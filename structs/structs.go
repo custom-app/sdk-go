@@ -7,15 +7,26 @@ import (
 
 type Role int32
 type SubKind int32
+type Platform int32
+type Purpose int32
+
+const (
+	PurposeAccess = Purpose(iota)
+	PurposeRefresh
+)
 
 type Account interface {
 	GetRole() Role
 	GetId() int64
+	GetPlatform() Platform
+	GetVersions() string
 }
 
 type DefaultAccount struct {
-	Id   int64
-	Role Role
+	Id       int64
+	Role     Role
+	Platform Platform
+	Versions []string
 }
 
 func (a *DefaultAccount) GetId() int64 {
@@ -24,6 +35,14 @@ func (a *DefaultAccount) GetId() int64 {
 
 func (a *DefaultAccount) GetRole() Role {
 	return a.Role
+}
+
+func (a *DefaultAccount) GetPlatform() Platform {
+	return a.Platform
+}
+
+func (a *DefaultAccount) GetVersions() []string {
+	return a.Versions
 }
 
 type SubData struct {
