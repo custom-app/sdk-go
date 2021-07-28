@@ -1,1 +1,1 @@
-module github.com/loyal-inform/sdk
+module github.com/loyal-inform/sdk-go
