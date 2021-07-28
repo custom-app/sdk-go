@@ -1,12 +1,13 @@
 package basic
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/loyal-inform/sdk-go/structs"
 )
 
-type AuthFunc func(login, password string, platform structs.Platform, versions []string) (structs.Account, error)
+type AuthFunc func(ctx context.Context, login, password string, platform structs.Platform, versions []string) (*structs.Account, error)
 
 var defaultAuth AuthFunc
 
@@ -14,9 +15,13 @@ var (
 	AuthFailedErr = errors.New("auth failed")
 )
 
-func Auth(login, password string, platform structs.Platform, versions []string) (structs.Account, error) {
+func Auth(ctx context.Context, login, password string, platform structs.Platform, versions []string) (*structs.Account, error) {
 	if defaultAuth == nil {
 		return nil, fmt.Errorf("unset func")
 	}
-	return defaultAuth(login, password, platform, versions)
+	return defaultAuth(ctx, login, password, platform, versions)
+}
+
+func SetDefaultAuth(f AuthFunc) {
+	defaultAuth = f
 }

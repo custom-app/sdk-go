@@ -15,46 +15,23 @@ const (
 	PurposeRefresh
 )
 
-type Account interface {
-	GetRole() Role
-	GetId() int64
-	GetPlatform() Platform
-	GetVersions() string
-}
-
-type DefaultAccount struct {
+type Account struct {
 	Id       int64
 	Role     Role
 	Platform Platform
 	Versions []string
 }
 
-func (a *DefaultAccount) GetId() int64 {
-	return a.Id
-}
-
-func (a *DefaultAccount) GetRole() Role {
-	return a.Role
-}
-
-func (a *DefaultAccount) GetPlatform() Platform {
-	return a.Platform
-}
-
-func (a *DefaultAccount) GetVersions() []string {
-	return a.Versions
-}
-
 type SubData struct {
 	Kind      SubKind
 	Data      proto.Message
-	Filters   map[Role]func(acc Account) bool
+	All       map[Role]bool
 	Force     bool
 	Receivers map[Role][]int64
 }
 
 type AccountUpdate struct {
-	Acc      Account
+	Acc      *Account
 	Id       int64
 	Role     Role
 	NeedDrop bool
@@ -80,6 +57,6 @@ func FilterAll() func(account *Account) bool {
 	}
 }
 
-type SimpleRequestProcessor func(ctx context.Context, acc Account, req proto.Message) proto.Message
+type SimpleRequestProcessor func(ctx context.Context, acc *Account, req proto.Message) proto.Message
 
-type RequestProcessor func(ctx context.Context, acc Account, req proto.Message) *Result
+type RequestProcessor func(ctx context.Context, acc *Account, req proto.Message) *Result

@@ -1,0 +1,356 @@
+package pg
+
+import (
+	"context"
+	"fmt"
+	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v4"
+	"github.com/jackc/pgx/v4/pgxpool"
+	"github.com/loyal-inform/sdk-go/logger"
+	"time"
+)
+
+type Scannable interface {
+	Query() error
+	Scan(...interface{}) error
+	HaveNext() bool
+	Close()
+}
+
+type RequestBuilder interface {
+	NewRequest(query string, params ...interface{}) *Request
+}
+
+type TxRequestBuilder struct {
+	tx *Transaction
+}
+
+func NewTxRequestBuilder(tx *Transaction) *TxRequestBuilder {
+	return &TxRequestBuilder{
+		tx: tx,
+	}
+}
+
+func NewRequestBuilder(tx *Transaction) RequestBuilder {
+	if tx != nil {
+		return NewTxRequestBuilder(tx)
+	} else {
+		return &DefaultRequestBuilder{}
+	}
+}
+
+func (t *TxRequestBuilder) NewRequest(query string, params ...interface{}) *Request {
+	return t.tx.NewRequest(query, params...)
+}
+
+type DefaultRequestBuilder struct {
+}
+
+func (d *DefaultRequestBuilder) NewRequest(query string, params ...interface{}) *Request {
+	return NewRequest(query, params...)
+}
+
+var db *pgxpool.Pool
+
+func logError(prefix string, err error) {
+	logger.Info("database err: ", prefix, err)
+}
+
+func Init(url string) (*pgxpool.Pool, error) {
+	if db != nil {
+		return db, nil
+	}
+	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
+	pool, err := pgxpool.Connect(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	db = pool
+	pool.Config().MaxConnLifetime = 2 * time.Minute
+	return pool, nil
+}
+
+func Ping() error {
+	if db == nil {
+		logger.Info("ping null db")
+		return fmt.Errorf("db is nil")
+	}
+	rows, err := db.Query(context.Background(), "select 1")
+	if err != nil {
+		logger.Info("ping query failed", err)
+		return err
+	}
+	defer rows.Close()
+	var res int64
+	if !rows.Next() {
+		logger.Info("doesn't have next")
+		return fmt.Errorf("doesn't have next")
+	}
+	if err := rows.Scan(&res); err != nil {
+		logger.Info("ping scan failed", err)
+		return err
+	}
+	if res != 1 {
+		logger.Info("ping wrong result")
+		return fmt.Errorf("false wrong result")
+	}
+	return nil
+}
+
+func Shutdown() {
+	if db != nil {
+		db.Close()
+		db = nil
+	}
+}
+
+type Request struct {
+	errorsCount int
+	query       string
+	params      []interface{}
+	row         pgx.Row
+	rows        pgx.Rows
+	tag         pgconn.CommandTag
+	err         error
+	empty, next bool
+	t           *Transaction
+}
+
+func NewRequest(query string, params ...interface{}) *Request {
+	return &Request{
+		query:  query,
+		params: params,
+	}
+}
+
+func (r *Request) RowsAffected() int64 {
+	return r.tag.RowsAffected()
+}
+
+func (r *Request) Exec() error {
+	if r.t != nil {
+		r.tag, r.err = r.t.tx.Exec(context.Background(), r.query, r.params...)
+	} else {
+		r.tag, r.err = db.Exec(context.Background(), r.query, r.params...)
+	}
+	if r.err != nil {
+		logError("request exec", r.err)
+	}
+	return r.err
+}
+
+func (r *Request) Query() error {
+	if r.t != nil {
+		r.rows, r.err = r.t.tx.Query(context.Background(), r.query, r.params...)
+	} else {
+		r.rows, r.err = db.Query(context.Background(), r.query, r.params...)
+	}
+	if r.err == nil {
+		r.next = r.rows.Next()
+		r.empty = !r.next
+	} else {
+		logError("request query", r.err)
+	}
+	if r.rows.Err() != nil {
+		r.err = r.rows.Err()
+		if r.err != nil {
+			logError("request query rows", r.err)
+		}
+	}
+	return r.err
+}
+
+func (r *Request) QueryRow() {
+	if r.t != nil {
+		r.row = r.t.tx.QueryRow(context.Background(), r.query, r.params...)
+	} else {
+		r.row = db.QueryRow(context.Background(), r.query, r.params...)
+	}
+}
+
+func (r *Request) Close() {
+	r.rows.Close()
+}
+
+func (r *Request) HaveNext() bool {
+	if r.next {
+		r.next = false
+		return true
+	} else if r.empty {
+		return false
+	} else {
+		return r.rows.Next()
+	}
+}
+
+func (r *Request) IsEmpty() bool {
+	return r.empty
+}
+
+func (r *Request) Scan(dest ...interface{}) error {
+	if r.row != nil {
+		r.err = r.row.Scan(dest...)
+	} else if r.rows != nil {
+		r.err = r.rows.Scan(dest...)
+	} else {
+		r.err = fmt.Errorf("missing rows")
+	}
+	if r.err != nil {
+		logError("request scan", r.err)
+	}
+	return r.err
+}
+
+func (r *Request) Clone() *Request {
+	return &Request{
+		query:  r.query,
+		params: r.params,
+		t:      r.t,
+	}
+}
+
+type Batch struct {
+	errorsCount int
+	b           *pgx.Batch
+	t           *Transaction
+	res         pgx.BatchResults
+	rows        pgx.Rows
+	row         pgx.Row
+	tag         pgconn.CommandTag
+	empty, next bool
+	err         error
+}
+
+func NewBatch() *Batch {
+	return &Batch{
+		b: &pgx.Batch{},
+	}
+}
+
+func (b *Batch) AddRequest(query string, params ...interface{}) {
+	b.b.Queue(query, params...)
+}
+
+func (b *Batch) Send() {
+	if b.t != nil {
+		b.res = b.t.tx.SendBatch(context.Background(), b.b)
+	} else {
+		b.res = db.SendBatch(context.Background(), b.b)
+	}
+}
+
+func (b *Batch) RowsAffected() int64 {
+	return b.tag.RowsAffected()
+}
+
+func (b *Batch) Exec() error {
+	b.tag, b.err = b.res.Exec()
+	if b.err != nil {
+		logError("batch exec", b.err)
+	}
+	return b.err
+}
+
+func (b *Batch) Query() error {
+	b.rows, b.err = b.res.Query()
+	if b.err == nil {
+		b.next = b.rows.Next()
+		b.empty = !b.next
+	} else {
+		logError("batch query", b.err)
+	}
+	if b.rows.Err() != nil {
+		if b.err != nil {
+			logError("batch query rows", b.err)
+		}
+		b.err = b.rows.Err()
+	}
+	return b.err
+}
+
+func (b *Batch) QueryRow() {
+	b.row = b.res.QueryRow()
+}
+
+func (b *Batch) Close() {
+	b.rows.Close()
+}
+
+func (b *Batch) Release() {
+	if err := b.res.Close(); err != nil {
+		logError("batch release", err)
+	}
+}
+
+func (b *Batch) HaveNext() bool {
+	if b.next {
+		b.next = false
+		return true
+	} else if b.empty {
+		return false
+	} else {
+		return b.rows.Next()
+	}
+}
+
+func (b *Batch) Scan(values ...interface{}) error {
+	if b.row != nil {
+		b.err = b.row.Scan(values...)
+	} else if b.rows != nil {
+		b.err = b.rows.Scan(values...)
+	} else {
+		b.err = fmt.Errorf("missing rows")
+	}
+	if b.err != nil {
+		logError("batch scan err", b.err)
+		return b.err
+	}
+	return b.err
+}
+
+type Transaction struct {
+	logPrefix   string
+	tx          pgx.Tx
+	isCommitted bool
+	err         error
+}
+
+func NewTransaction(opts pgx.TxOptions) (*Transaction, error) {
+	tx, err := db.BeginTx(context.Background(), opts)
+	if err != nil {
+		logError("begin tx", err)
+		return nil, err
+	}
+	return &Transaction{
+		tx: tx,
+	}, nil
+}
+
+func (t *Transaction) Commit() error {
+	if err := t.tx.Commit(context.Background()); err != nil {
+		logError("commit tx", err)
+		return err
+	}
+	t.isCommitted = true
+	return nil
+}
+
+func (t *Transaction) Rollback() {
+	if !t.isCommitted {
+		if err := t.tx.Rollback(context.Background()); err != nil {
+			logError("rollback tx", err)
+		}
+	}
+}
+
+func (t *Transaction) NewRequest(query string, params ...interface{}) *Request {
+	res := NewRequest(query, params...)
+	res.t = t
+	return res
+}
+
+func (t *Transaction) NewBatch() *Batch {
+	res := NewBatch()
+	res.t = t
+	return res
+}

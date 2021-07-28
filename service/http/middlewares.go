@@ -3,7 +3,6 @@ package http
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/loyal-inform/sdk-go/auth/basic"
 	"github.com/loyal-inform/sdk-go/auth/jwt/multiple"
 	"github.com/loyal-inform/sdk-go/auth/jwt/single"
@@ -23,7 +22,8 @@ const (
 )
 
 var (
-	PermissionDenied = errors.New("permission denied")
+	PermissionDenied   = errors.New("permission denied")
+	MissingCredentials = errors.New("missing credentials")
 )
 
 type VersionChecker func(platform structs.Platform, versions []string) (int, proto.Message)
@@ -70,17 +70,17 @@ func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...str
 			platform, _ := r.Context().Value(consts.PlatformCtxKey).(structs.Platform)
 			versions, _ := r.Context().Value(consts.VersionsCtxKey).([]string)
 			var (
-				acc    structs.Account
+				acc    *structs.Account
 				number int64 = -1
 				err    error
 			)
 			if ok && accepted.Basic {
-				acc, err = basic.Auth(login, password, platform, versions)
+				acc, err = basic.Auth(r.Context(), login, password, platform, versions)
 			} else if isToken && accepted.MultipleTokens {
 				if accepted.AuthToken {
-					acc, number, err = multiple.Auth(a[TokenStartInd:], structs.PurposeAccess, platform, versions)
+					acc, number, err = multiple.Auth(r.Context(), a[TokenStartInd:], structs.PurposeAccess, platform, versions)
 				} else {
-					acc, number, err = multiple.Auth(a[TokenStartInd:], structs.PurposeRefresh, platform, versions)
+					acc, number, err = multiple.Auth(r.Context(), a[TokenStartInd:], structs.PurposeRefresh, platform, versions)
 				}
 			} else if isToken && !accepted.MultipleTokens {
 				if accepted.AuthToken {
@@ -89,7 +89,7 @@ func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...str
 					acc, err = single.Auth(a[TokenStartInd:], structs.PurposeRefresh, platform, versions)
 				}
 			} else {
-				err = fmt.Errorf("missing cerdentials")
+				err = MissingCredentials
 			}
 			if err != nil {
 				code, e := errorMapper(PermissionDenied)
@@ -98,7 +98,7 @@ func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...str
 			}
 			var ctx context.Context
 			for _, role := range roles {
-				if role == acc.GetRole() {
+				if role == acc.Role {
 					ctx = context.WithValue(r.Context(), consts.AccountCtxKey, acc)
 					if number != -1 {
 						ctx = context.WithValue(ctx, consts.TokenNumberCtxKey, number)
