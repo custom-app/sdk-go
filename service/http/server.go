@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/gorilla/mux"
+	"github.com/loyal-inform/sdk-go/logger"
 	"github.com/loyal-inform/sdk-go/util/consts"
-	"log"
 	"net/http"
 )
 
@@ -38,13 +38,13 @@ func (s *Server) handleSelfHealth(w http.ResponseWriter, _ *http.Request) {
 	if err != nil {
 		w.WriteHeader(500)
 		if _, err := w.Write([]byte{}); err != nil {
-			log.Println("write failed", err)
+			logger.Info("write failed", err)
 		}
 		return
 	}
 	w.WriteHeader(200)
 	if _, err := w.Write(data); err != nil {
-		log.Println("write failed", err)
+		logger.Info("write failed", err)
 	}
 }
 
@@ -55,13 +55,13 @@ func (s *Server) handleOtherHealth(w http.ResponseWriter, _ *http.Request) {
 	if err != nil {
 		w.WriteHeader(500)
 		if _, err := w.Write([]byte{}); err != nil {
-			log.Println("write failed", err)
+			logger.Info("write failed", err)
 		}
 		return
 	}
 	w.WriteHeader(200)
 	if _, err := w.Write(data); err != nil {
-		log.Println("write failed", err)
+		logger.Info("write failed", err)
 	}
 }
 
