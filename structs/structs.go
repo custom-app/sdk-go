@@ -30,30 +30,17 @@ type SubData struct {
 	Receivers map[Role][]int64
 }
 
-type AccountUpdate struct {
-	Acc      *Account
-	Id       int64
-	Role     Role
-	NeedDrop bool
-}
-
 type Result struct {
 	Response       proto.Message
 	Subs           []*SubData
-	AccountUpdates []*AccountUpdate
+	AccountsToDrop []*Account
 }
 
-func NewResult(resp proto.Message, subs []*SubData, accounts []*AccountUpdate) *Result {
+func NewResult(resp proto.Message, subs []*SubData, accountsToDrop []*Account) *Result {
 	return &Result{
 		Response:       resp,
 		Subs:           subs,
-		AccountUpdates: accounts,
-	}
-}
-
-func FilterAll() func(account *Account) bool {
-	return func(account *Account) bool {
-		return true
+		AccountsToDrop: accountsToDrop,
 	}
 }
 

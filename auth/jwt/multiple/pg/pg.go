@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"github.com/dgrijalva/jwt-go"
 	"github.com/jackc/pgx/v4"
+	"github.com/loyal-inform/sdk-go/auth"
 	jwt2 "github.com/loyal-inform/sdk-go/auth/jwt"
+	pg2 "github.com/loyal-inform/sdk-go/auth/pg"
 	"github.com/loyal-inform/sdk-go/db/pg"
 	"github.com/loyal-inform/sdk-go/service/job"
 	"github.com/loyal-inform/sdk-go/structs"
 	"github.com/loyal-inform/sdk-go/util/locker"
 	time2 "github.com/loyal-inform/sdk-go/util/time"
+	"google.golang.org/protobuf/proto"
 	"math/rand"
 	"strings"
 	"time"
@@ -28,6 +31,7 @@ type AuthorizationMaker struct {
 	key                                                  string
 	queue                                                *job.DatabaseQueue
 	accessTokenTimeout, refreshTokenTimeout, authTimeout time.Duration
+	accountLoader                                        pg2.AccountLoader
 }
 
 func init() {
@@ -42,13 +46,14 @@ func randomString(l int) string {
 	return string(res)
 }
 
-func NewMaker(tokenTables map[structs.Role]string, key string, queue *job.DatabaseQueue,
+func NewMaker(tokenTables map[structs.Role]string, key string, queue *job.DatabaseQueue, loader pg2.AccountLoader,
 	accessTokenTimeout, refreshTokenTimeout, authTimeout time.Duration) *AuthorizationMaker {
 	res := &AuthorizationMaker{
 		lockers:             make(map[structs.Role]*locker.LockSystem, len(tokenTables)),
 		tokenTables:         make(map[structs.Role]string, len(tokenTables)),
 		key:                 key,
 		queue:               queue,
+		accountLoader:       loader,
 		accessTokenTimeout:  accessTokenTimeout,
 		refreshTokenTimeout: refreshTokenTimeout,
 		authTimeout:         authTimeout,
@@ -61,7 +66,7 @@ func NewMaker(tokenTables map[structs.Role]string, key string, queue *job.Databa
 }
 
 func (m *AuthorizationMaker) Auth(ctx context.Context, token string, purpose structs.Purpose,
-	platform structs.Platform, versions []string) (*structs.Account, int64, error) {
+	platform structs.Platform, versions []string, disabled ...structs.Role) (*structs.Account, int64, error) {
 	t, err := m.parseToken(token)
 	if err != nil {
 		return nil, 0, err
@@ -75,12 +80,46 @@ func (m *AuthorizationMaker) Auth(ctx context.Context, token string, purpose str
 		if err != nil {
 			return err
 		}
+		for _, r := range disabled {
+			if r == acc.Role {
+				return auth.PermissionDeniedErr
+			}
+		}
 		return nil
 	}, m.authTimeout); err != nil {
 		return nil, 0, err
 	}
 	acc.Platform, acc.Versions = platform, versions
 	return acc, number, nil
+}
+
+func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, token string, purpose structs.Purpose, platform structs.Platform,
+	versions []string, disabled ...structs.Role) (*structs.Account, int64, proto.Message, error) {
+	t, err := m.parseToken(token)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	var (
+		acc    *structs.Account
+		resp   proto.Message
+		number int64
+	)
+	if err := m.queue.MakeJob(ctx, pgx.TxOptions{}, func(ctx context.Context, tx *pg.Transaction) error {
+		acc, number, err = m.checkToken(tx, t, purpose)
+		if err != nil {
+			return err
+		}
+		for _, r := range disabled {
+			if r == acc.Role {
+				return auth.PermissionDeniedErr
+			}
+		}
+		return nil
+	}, m.authTimeout); err != nil {
+		return nil, 0, nil, err
+	}
+	acc.Platform, acc.Versions = platform, versions
+	return acc, number, resp, nil
 }
 
 func (m *AuthorizationMaker) parseToken(token string) (*jwt.Token, error) {
@@ -102,15 +141,15 @@ func (m *AuthorizationMaker) checkToken(tx *pg.Transaction, token *jwt.Token, pu
 		return nil, 0, jwt2.ParseTokenErr
 	}
 	if !claims.VerifyExpiresAt(time2.Now().Unix(), true) {
-		return nil, 0, jwt2.ExpiredToken
+		return nil, 0, jwt2.ExpiredTokenErr
 	}
 	if realPurpose, ok := claims["purpose"].(float64); !ok {
-		return nil, 0, jwt2.InvalidToken
+		return nil, 0, jwt2.InvalidTokenErr
 	} else if structs.Purpose(realPurpose) != purpose {
-		return nil, 0, jwt2.InvalidTokenPurpose
+		return nil, 0, jwt2.InvalidTokenPurposeErr
 	}
 	if !token.Valid {
-		return nil, 0, jwt2.InvalidToken
+		return nil, 0, jwt2.InvalidTokenErr
 	}
 	id, err := parseTokenIntClaim(claims, "id")
 	if err != nil {
@@ -129,7 +168,7 @@ func (m *AuthorizationMaker) checkToken(tx *pg.Transaction, token *jwt.Token, pu
 		return nil, 0, err
 	}
 	if _, ok := m.tokenTables[structs.Role(role)]; !ok {
-		return nil, 0, jwt2.InvalidToken
+		return nil, 0, jwt2.InvalidTokenErr
 	}
 	if e := m.checkSecret(tx, structs.Role(role), id, number, purpose, secret); e != nil {
 		return nil, 0, e
@@ -142,7 +181,7 @@ func (m *AuthorizationMaker) checkToken(tx *pg.Transaction, token *jwt.Token, pu
 
 func parseTokenIntClaim(claims jwt.MapClaims, key string) (int64, error) {
 	if parsedValue, ok := claims[key].(float64); !ok {
-		return 0, jwt2.InvalidToken
+		return 0, jwt2.InvalidTokenErr
 	} else {
 		return int64(parsedValue), nil
 	}
@@ -150,7 +189,7 @@ func parseTokenIntClaim(claims jwt.MapClaims, key string) (int64, error) {
 
 func parseTokenStringClaim(claims jwt.MapClaims, key string) (string, error) {
 	if stringValue, ok := claims[key].(string); !ok {
-		return "", jwt2.InvalidToken
+		return "", jwt2.InvalidTokenErr
 	} else {
 		return stringValue, nil
 	}
@@ -164,7 +203,7 @@ func (m *AuthorizationMaker) checkSecret(tx *pg.Transaction, role structs.Role, 
 	}
 	checkReq.Close()
 	if checkReq.IsEmpty() {
-		return jwt2.AuthFailedErr
+		return auth.FailedAuthErr
 	}
 	return nil
 }
