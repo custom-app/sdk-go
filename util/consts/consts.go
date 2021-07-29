@@ -7,6 +7,11 @@ const (
 	JsonContentType   = "application/json"
 	ProtoContentType  = "application/x-protobuf"
 
+	AuthHeader       = "Authorization"
+	TokenStart       = "Bearer "
+	TokenStartInd    = len(TokenStart)
+	VersionDelimiter = ":"
+
 	PlatformCtxKey    = "platform"
 	VersionsCtxKey    = "versions"
 	AccountCtxKey     = "account"

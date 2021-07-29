@@ -14,42 +14,36 @@ import (
 	"strings"
 )
 
-const (
-	AuthHeader       = "Authorization"
-	TokenStart       = "Bearer "
-	TokenStartInd    = len(TokenStart)
-	VersionDelimiter = ":"
-)
-
 var (
 	PermissionDenied   = errors.New("permission denied")
 	MissingCredentials = errors.New("missing credentials")
 )
+
+func ParseVersionHeader(header http.Header, key string) (structs.Platform, []string) {
+	value := header.Get(key)
+	parts := strings.Split(value, consts.VersionDelimiter)
+	if len(parts) < 2 {
+		return 0, nil
+	}
+	p, err := strconv.ParseInt(parts[0], 10, 32)
+	if err != nil {
+		return 0, nil
+	}
+	return structs.Platform(p), parts[1:]
+}
 
 type VersionChecker func(platform structs.Platform, versions []string) (int, proto.Message)
 
 func VersionMiddleware(header string, checker VersionChecker) func(http.Handler) http.Handler {
 	return func(handler http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			value := r.Header.Get(header)
-			parts := strings.Split(value, VersionDelimiter)
-			if len(parts) < 2 {
-				code, e := checker(0, nil)
+			platform, versions := ParseVersionHeader(r.Header, header)
+			if code, e := checker(platform, versions); e != nil {
 				SendResponseWithContentType(w, r, code, e)
 				return
 			}
-			p, err := strconv.ParseInt(parts[0], 10, 32)
-			if err != nil {
-				code, e := checker(0, nil)
-				SendResponseWithContentType(w, r, code, e)
-				return
-			}
-			if code, e := checker(structs.Platform(p), parts[1:]); e != nil {
-				SendResponseWithContentType(w, r, code, e)
-				return
-			}
-			ctx := context.WithValue(r.Context(), consts.PlatformCtxKey, structs.Platform(p))
-			ctx = context.WithValue(r.Context(), consts.VersionsCtxKey, parts[1:])
+			ctx := context.WithValue(r.Context(), consts.PlatformCtxKey, platform)
+			ctx = context.WithValue(r.Context(), consts.VersionsCtxKey, versions)
 			handler.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -64,8 +58,8 @@ type AuthErrorMapper func(error) (int, proto.Message)
 func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...structs.Role) func(http.Handler) http.Handler {
 	return func(handler http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			a := r.Header.Get(AuthHeader)
-			isToken := strings.HasPrefix(a, TokenStart)
+			a := r.Header.Get(consts.AuthHeader)
+			isToken := strings.HasPrefix(a, consts.TokenStart)
 			login, password, ok := r.BasicAuth()
 			platform, _ := r.Context().Value(consts.PlatformCtxKey).(structs.Platform)
 			versions, _ := r.Context().Value(consts.VersionsCtxKey).([]string)
@@ -78,15 +72,19 @@ func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...str
 				acc, err = basic.Auth(r.Context(), login, password, platform, versions)
 			} else if isToken && accepted.MultipleTokens {
 				if accepted.AuthToken {
-					acc, number, err = multiple.Auth(r.Context(), a[TokenStartInd:], structs.PurposeAccess, platform, versions)
+					acc, number, err = multiple.Auth(r.Context(), a[consts.TokenStartInd:],
+						structs.PurposeAccess, platform, versions)
 				} else {
-					acc, number, err = multiple.Auth(r.Context(), a[TokenStartInd:], structs.PurposeRefresh, platform, versions)
+					acc, number, err = multiple.Auth(r.Context(), a[consts.TokenStartInd:],
+						structs.PurposeRefresh, platform, versions)
 				}
 			} else if isToken && !accepted.MultipleTokens {
 				if accepted.AuthToken {
-					acc, err = single.Auth(a[TokenStartInd:], structs.PurposeAccess, platform, versions)
+					acc, err = single.Auth(r.Context(), a[consts.TokenStartInd:],
+						structs.PurposeAccess, platform, versions)
 				} else {
-					acc, err = single.Auth(a[TokenStartInd:], structs.PurposeRefresh, platform, versions)
+					acc, err = single.Auth(r.Context(), a[consts.TokenStartInd:],
+						structs.PurposeRefresh, platform, versions)
 				}
 			} else {
 				err = MissingCredentials

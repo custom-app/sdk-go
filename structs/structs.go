@@ -22,26 +22,36 @@ type Account struct {
 	Versions []string
 }
 
-type SubData struct {
-	Kind      SubKind
-	Data      proto.Message
-	All       map[Role]bool
-	Force     bool
-	Receivers map[Role][]int64
+type SubData interface {
+	GetKind() SubKind
+	GetData() proto.Message
+	GetAll() map[Role]bool
+	GetForce() bool
+	GetReceivers() map[Role][]int64
 }
 
-type Result struct {
-	Response       proto.Message
-	Subs           []*SubData
+type Result interface {
+	GetResponse() proto.Message
+	GetSubs() []SubData
+	GetAccountsToDrop() []*Account
+}
+
+type DefaultResult struct {
+	Response proto.Message
+	Subs []SubData
 	AccountsToDrop []*Account
 }
 
-func NewResult(resp proto.Message, subs []*SubData, accountsToDrop []*Account) *Result {
-	return &Result{
-		Response:       resp,
-		Subs:           subs,
-		AccountsToDrop: accountsToDrop,
-	}
+func (d *DefaultResult) GetResponse() proto.Message {
+	return d.Response
+}
+
+func (d *DefaultResult) GetSubs() []SubData {
+	return d.Subs
+}
+
+func (d *DefaultResult) GetAccountsToDrop() []*Account {
+	return d.AccountsToDrop
 }
 
 type SimpleRequestProcessor func(ctx context.Context, acc *Account, req proto.Message) proto.Message
