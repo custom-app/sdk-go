@@ -1,7 +1,8 @@
-package ws
+package pool
 
 import (
 	"github.com/loyal-inform/sdk-go/logger"
+	"github.com/loyal-inform/sdk-go/service/ws/conn"
 	"github.com/loyal-inform/sdk-go/structs"
 	"github.com/loyal-inform/sdk-go/util/locker"
 	"google.golang.org/protobuf/proto"
@@ -10,7 +11,7 @@ import (
 
 type Pool struct {
 	pools       map[structs.Role]sameRolePool
-	authOptions *AuthOptions
+	authOptions *conn.AuthOptions
 }
 
 type sameRolePool struct {
@@ -18,9 +19,9 @@ type sameRolePool struct {
 	conns map[int64]orderedConn
 }
 
-type orderedConn []*Conn
+type orderedConn []*conn.ClientPrivateConn
 
-func NewPool(authOptions *AuthOptions, roles []structs.Role) (*Pool, error) {
+func NewPool(authOptions *conn.AuthOptions, roles []structs.Role) (*Pool, error) {
 	res := &Pool{
 		pools:       map[structs.Role]sameRolePool{},
 		authOptions: authOptions,
@@ -35,8 +36,8 @@ func NewPool(authOptions *AuthOptions, roles []structs.Role) (*Pool, error) {
 	return res, nil
 }
 
-func (p *Pool) AddConnection(w http.ResponseWriter, r *http.Request, handler MessageHandler) *Conn {
-	c, err := NewConn(w, r, handler, p.onclose, p.authOptions)
+func (p *Pool) AddConnection(w http.ResponseWriter, r *http.Request, handler conn.MessageHandler) *conn.Conn {
+	c, err := conn.NewConn(w, r, handler, p.onclose, p.authOptions)
 	if err != nil {
 		logger.Log("add connection failed: ", err)
 		return nil
@@ -75,7 +76,7 @@ func (p *Pool) AddConnection(w http.ResponseWriter, r *http.Request, handler Mes
 	return c
 }
 
-func (p *Pool) onclose(acc *structs.Account, conn *Conn) {
+func (p *Pool) onclose(acc *structs.Account, conn *conn.Conn) {
 	rolePool := p.pools[acc.Role]
 	rolePool.lock.Lock(acc.Id)
 	defer rolePool.lock.Unlock(acc.Id)
