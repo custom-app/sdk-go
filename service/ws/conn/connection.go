@@ -50,7 +50,7 @@ type Message struct {
 	Data []byte
 }
 
-type ConnOptions struct {
+type Options struct {
 	ContentType                       string
 	OverflowMsg                       proto.Message
 	OverflowMsgJson, OverflowMsgProto []byte
@@ -61,7 +61,7 @@ type ConnOptions struct {
 
 type Conn struct {
 	conn    *websocket.Conn // собственно, соединение
-	opts    *ConnOptions
+	opts    *Options
 	isAlive int32 // счетчик для определения, живо ли соединение
 
 	sendLock                 *sync.Mutex        // мутекс для последовательной обработки отправки/пинга/закрытия
@@ -74,7 +74,7 @@ type Conn struct {
 	subscriptions map[structs.SubKind]bool // активированные подписки
 }
 
-func fillOpts(opts *ConnOptions) error {
+func fillOpts(opts *Options) error {
 	var err error
 	if opts.OverflowMsgJson == nil {
 		opts.OverflowMsgJson, err = marshaler.Marshal(opts.OverflowMsg)
@@ -106,7 +106,7 @@ func fillOpts(opts *ConnOptions) error {
 	return nil
 }
 
-func NewConn(conn *websocket.Conn, opts *ConnOptions) (*Conn, error) {
+func newConn(conn *websocket.Conn, opts *Options, needStart bool) (*Conn, error) {
 	if opts == nil {
 		return nil, OptsRequiredErr
 	}
@@ -124,11 +124,18 @@ func NewConn(conn *websocket.Conn, opts *ConnOptions) (*Conn, error) {
 		pingCloseCh: make(chan bool),
 		opts:        opts,
 	}
+	if needStart {
+		res.start()
+	}
 
 	return res, nil
 }
 
-func UpgradeConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request, opts *ConnOptions) (*Conn, error) {
+func NewConn(conn *websocket.Conn, opts *Options) (*Conn, error) {
+	return newConn(conn, opts, true)
+}
+
+func UpgradeConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request, opts *Options) (*Conn, error) {
 	defer r.Body.Close()
 	if opts == nil {
 		return nil, OptsRequiredErr
@@ -140,13 +147,13 @@ func UpgradeConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Re
 	return NewConn(conn, opts)
 }
 
-func (c *Conn) Start() {
+func (c *Conn) start() {
 	go c.pingPong()
 	go c.listenReceiveWithStop()
 	go c.listenSend()
 }
 
-func (c *Conn) SendProto(data proto.Message) {
+func (c *Conn) sendProto(data proto.Message) {
 	var (
 		bytes []byte
 		err   error
@@ -160,7 +167,7 @@ func (c *Conn) SendProto(data proto.Message) {
 		logger.Log("ws marshal proto err: ", err)
 		return
 	}
-	c.Send(bytes)
+	c.send(bytes)
 }
 
 func (c *Conn) processSendData(data sendData) {
@@ -173,17 +180,17 @@ func (c *Conn) processSendData(data sendData) {
 	c.sendLock.Unlock()
 }
 
-func (c *Conn) Send(data []byte) {
+func (c *Conn) send(data []byte) {
 	c.processSendData(sendData{
 		data: data,
 	})
 }
 
-func (c *Conn) SendOverflowMessage() {
+func (c *Conn) sendOverflowMessage() {
 	if c.opts.ContentType == consts.JsonContentType {
-		c.Send(c.opts.OverflowMsgJson)
+		c.send(c.opts.OverflowMsgJson)
 	} else {
-		c.Send(c.opts.OverflowMsgProto)
+		c.send(c.opts.OverflowMsgProto)
 	}
 }
 
@@ -206,7 +213,7 @@ func (c *Conn) listenReceive() {
 		c.wg.Add(1)
 		if len(c.receiveBuf) == cap(c.receiveBuf) {
 			logger.Log("receive buffer overflow")
-			c.SendOverflowMessage()
+			c.sendOverflowMessage()
 			continue
 		}
 		select {
@@ -217,7 +224,7 @@ func (c *Conn) listenReceive() {
 			break
 		case <-time.After(c.opts.ReceiveBufTimeout):
 			c.wg.Done()
-			c.SendOverflowMessage()
+			c.sendOverflowMessage()
 		}
 	}
 }
@@ -232,7 +239,7 @@ L:
 	for {
 		select {
 		case data := <-c.sendBuf:
-			c.SendProto(data)
+			c.sendProto(data)
 			c.wg.Done()
 			break
 		case <-c.sendCloseCh:
@@ -276,8 +283,23 @@ L:
 	}
 }
 
+func (c *Conn) ReceiveBuf() chan *Message {
+	return c.receiveBuf
+}
+
+func (c *Conn) SendBuf() chan proto.Message {
+	return c.sendBuf
+}
+
 func (c *Conn) IsAlive() bool {
 	return atomic.LoadInt32(&c.isAlive) == 0
+}
+
+func (c *Conn) GetSub(kind structs.SubKind) bool {
+	c.subLock.RLock()
+	res := c.subscriptions[kind]
+	c.subLock.RUnlock()
+	return res
 }
 
 func (c *Conn) SetSub(kind structs.SubKind, value bool) {

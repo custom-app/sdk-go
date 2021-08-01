@@ -29,22 +29,22 @@ type AuthOptions struct {
 }
 
 type ServerPublicConnOptions struct {
-	*ConnOptions
+	*Options
 	Onclose func(int64)
-	ConnId  int64
 }
 
 // ServerPublicConn - соединение с клиентом на стороне сервера
 type ServerPublicConn struct {
 	*Conn
 	opts *ServerPublicConnOptions
+	connId  int64
 }
 
 func fillServerPublicOptions(opts *ServerPublicConnOptions) error {
-	if opts.ConnOptions == nil {
+	if opts.Options == nil {
 		return OptsRequiredErr
 	}
-	return fillOpts(opts.ConnOptions)
+	return fillOpts(opts.Options)
 }
 
 func NewServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions) (*ServerPublicConn, error) {
@@ -54,14 +54,16 @@ func NewServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions) (*
 	if err := fillServerPublicOptions(opts); err != nil {
 		return nil, err
 	}
-	c, err := NewConn(conn, opts.ConnOptions)
+	c, err := NewConn(conn, opts.Options)
 	if err != nil {
 		return nil, err
 	}
-	return &ServerPublicConn{
+	res := &ServerPublicConn{
 		Conn: c,
 		opts: opts,
-	}, nil
+	}
+	res.start()
+	return res, nil
 }
 
 func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
@@ -83,14 +85,18 @@ func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter
 	return NewServerPublicConn(conn, opts)
 }
 
+func (c *ServerPublicConn) SetConnId(value int64) {
+	c.connId = value
+}
+
 func (c *ServerPublicConn) ConnId() int64 {
-	return c.opts.ConnId
+	return c.connId
 }
 
 func (c *ServerPublicConn) Close() {
 	c.Conn.Close()
 	if c.opts.Onclose != nil {
-		c.opts.Onclose(c.opts.ConnId)
+		c.opts.Onclose(c.connId)
 	}
 }
 
@@ -178,7 +184,7 @@ func privateServerConnViaToken(upgrader *websocket.Upgrader, w http.ResponseWrit
 		return nil, err
 	}
 	res.SetAccount(acc)
-	res.SendProto(resp)
+	res.sendBuf <- resp
 	return res, nil
 }
 
@@ -207,7 +213,7 @@ func privateServerConnViaBasic(upgrader *websocket.Upgrader, w http.ResponseWrit
 		return nil, err
 	}
 	res.SetAccount(acc)
-	res.SendProto(resp)
+	res.sendBuf <- resp
 	return res, nil
 }
 
@@ -231,7 +237,7 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 		return nil, err
 	}
 	res.SetAccount(authRes.Account)
-	res.SendProto(authRes.Resp)
+	res.sendBuf <- authRes.Resp
 	return res, nil
 }
 
@@ -282,7 +288,7 @@ func (c *ServerPrivateConn) AuthConfirm(res *AuthRes) {
 }
 
 func (c *ServerPrivateConn) ConnId() int64 {
-	return c.opts.ConnId
+	return c.connId
 }
 
 func (c *ServerPrivateConn) GetAccount() *structs.Account {
@@ -301,6 +307,6 @@ func (c *ServerPrivateConn) SetAccount(acc *structs.Account) {
 func (c *ServerPrivateConn) Close() {
 	c.Conn.Close()
 	if c.opts.Onclose != nil {
-		c.opts.Onclose(c.account, c.opts.ConnId)
+		c.opts.Onclose(c.account, c.connId)
 	}
 }

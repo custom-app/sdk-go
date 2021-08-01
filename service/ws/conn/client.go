@@ -34,7 +34,7 @@ type clientSubData struct {
 }
 
 type ClientPublicConnOptions struct {
-	*ConnOptions
+	*Options
 	RetryLimit              int
 	RetryPeriod, SubTimeout time.Duration
 }
@@ -52,10 +52,10 @@ type ClientPublicConn struct {
 }
 
 func fillClientPublicOptions(opts *ClientPublicConnOptions) error {
-	if opts.ConnOptions == nil {
+	if opts.Options == nil {
 		return OptsRequiredErr
 	}
-	if err := fillOpts(opts.ConnOptions); err != nil {
+	if err := fillOpts(opts.Options); err != nil {
 		return err
 	}
 	if opts.RetryLimit == 0 {
@@ -70,7 +70,7 @@ func fillClientPublicOptions(opts *ClientPublicConnOptions) error {
 	return nil
 }
 
-func NewClientConn(url string, header http.Header, opts *ClientPublicConnOptions) (*ClientPublicConn, error) {
+func newClientConn(url string, header http.Header, opts *ClientPublicConnOptions, needStart bool) (*ClientPublicConn, error) {
 	if err := fillClientPublicOptions(opts); err != nil {
 		return nil, err
 	}
@@ -89,21 +89,29 @@ func NewClientConn(url string, header http.Header, opts *ClientPublicConnOptions
 		break
 	}
 	opts.ContentType = header.Get(consts.HeaderContentType)
-	c, err := NewConn(conn, opts.ConnOptions)
+	c, err := NewConn(conn, opts.Options)
 	if err != nil {
 		return nil, err
 	}
-	return &ClientPublicConn{
+	res :=  &ClientPublicConn{
 		Conn:        c,
 		url:         url,
 		header:      header,
 		needRestart: true,
 		subData:     map[structs.SubKind]clientSubData{},
 		subDataLock: &sync.RWMutex{},
-	}, nil
+	}
+	if needStart {
+		res.start()
+	}
+	return res, nil
 }
 
-func (c *ClientPublicConn) Start() {
+func NewClientConn(url string, header http.Header, opts *ClientPublicConnOptions) (*ClientPublicConn, error) {
+	return newClientConn(url, header, opts, true)
+}
+
+func (c *ClientPublicConn) start() {
 	go c.pingPong()
 	go c.listenReceive()
 	go c.listenSend()
@@ -125,7 +133,7 @@ func (c *ClientPublicConn) Sub(kind structs.SubKind, req proto.Message) error {
 }
 
 func (c *ClientPublicConn) sub(kind structs.SubKind, req proto.Message, confirmCh chan bool) error {
-	c.SendProto(req)
+	c.sendBuf <- req
 	select {
 	case _, _ = <-confirmCh:
 		c.SetSub(kind, true)
@@ -162,7 +170,7 @@ func (c *ClientPublicConn) restart() {
 			continue
 		}
 		c.conn = conn
-		c.Start()
+		c.start()
 		c.restartSubs()
 		break
 	}
@@ -249,11 +257,14 @@ func NewClientPrivateConnWithRequest(url string, data proto.Message, opts *Clien
 		authSuccessChan:     make(chan bool),
 		authSuccessChanLock: &sync.RWMutex{},
 	}
-	return res, res.Auth()
+	res.start()
+	return res, res.auth()
 }
 
 func NewClientPrivateConnWithBasic(url, login, pass string, opts *ClientPrivateConnOptions) (*ClientPrivateConn, error) {
-	fillClientPrivateConnOptions(opts)
+	if err := fillClientPrivateConnOptions(opts); err != nil {
+		return nil, err
+	}
 	header := http.Header{}
 	header.Set(consts.HeaderContentType, opts.ContentType)
 	header.Set(consts.AuthHeader,
@@ -267,11 +278,14 @@ func NewClientPrivateConnWithBasic(url, login, pass string, opts *ClientPrivateC
 		authSuccessChan:     make(chan bool),
 		authSuccessChanLock: &sync.RWMutex{},
 	}
-	return res, res.Auth()
+	res.start()
+	return res, res.auth()
 }
 
 func NewClientPrivateConnWithToken(url, token string, opts *ClientPrivateConnOptions) (*ClientPrivateConn, error) {
-	fillClientPrivateConnOptions(opts)
+	if err := fillClientPrivateConnOptions(opts); err != nil {
+		return nil, err
+	}
 	header := http.Header{}
 	header.Set(consts.HeaderContentType, opts.ContentType)
 	header.Set(consts.AuthHeader, fmt.Sprintf("Bearer %s", token))
@@ -284,12 +298,19 @@ func NewClientPrivateConnWithToken(url, token string, opts *ClientPrivateConnOpt
 		authSuccessChan:     make(chan bool),
 		authSuccessChanLock: &sync.RWMutex{},
 	}
-	return res, res.Auth()
+	res.start()
+	return res, res.auth()
 }
 
-func (c *ClientPrivateConn) Auth() error {
+func (c *ClientPrivateConn) start() {
+	go c.pingPong()
+	go c.listenReceive()
+	go c.listenSend()
+}
+
+func (c *ClientPrivateConn) auth() error {
 	if c.authData != nil {
-		c.SendProto(c.authData)
+		c.sendBuf <- c.authData
 	}
 	select {
 	case _, _ = <-c.authSuccessChan:
@@ -319,8 +340,8 @@ func (c *ClientPrivateConn) restart() {
 			continue
 		}
 		c.conn = conn
-		c.Start()
-		if err := c.Auth(); err != nil {
+		c.start()
+		if err := c.auth(); err != nil {
 			logger.Info("restart auth failed", err)
 			if err := c.conn.Close(); err != nil {
 				logger.Info("restart close after auth failed err", err)
