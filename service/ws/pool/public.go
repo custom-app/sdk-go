@@ -16,13 +16,15 @@ type PublicPool struct {
 	conns    map[int64]*conn.ServerPublicConn
 	connLock *sync.RWMutex
 	opts     *conn.ServerPublicConnOptions
+	queue    chan *conn.Message
 }
 
-func NewPublicPool(opts *conn.ServerPublicConnOptions) (*PublicPool, error) {
+func NewPublicPool(opts *conn.ServerPublicConnOptions, queueSize int) (*PublicPool, error) {
 	res := &PublicPool{
 		conns:    map[int64]*conn.ServerPublicConn{},
 		opts:     opts,
 		connLock: &sync.RWMutex{},
+		queue:    make(chan *conn.Message, queueSize),
 	}
 	opts.Onclose = res.onclose
 	return res, nil
@@ -46,6 +48,11 @@ func (p *PublicPool) AddConnection(w http.ResponseWriter, r *http.Request) (*con
 		return nil, err
 	}
 	c.SetConnId(id)
+	go func(c *conn.ServerPublicConn) {
+		for msg := range c.ReceiveBuf() {
+			p.queue <- msg
+		}
+	}(c)
 	return c, nil
 }
 
@@ -73,6 +80,10 @@ func (p *PublicPool) HandleResult(res structs.Result) {
 			p.SendOnSubAll(s.GetKind(), s.GetData())
 		}
 	}
+}
+
+func (p *PublicPool) GetQueue() chan *conn.Message {
+	return p.queue
 }
 
 func (p *PublicPool) Close() {

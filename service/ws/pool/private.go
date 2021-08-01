@@ -13,6 +13,7 @@ import (
 type PrivatePool struct {
 	pools map[structs.Role]sameRolePool
 	opts  *conn.ServerPrivateConnOptions
+	queue chan *conn.Message
 }
 
 type sameRolePool struct {
@@ -22,10 +23,11 @@ type sameRolePool struct {
 
 type orderedConn []*conn.ServerPrivateConn
 
-func NewPrivatePool(opts *conn.ServerPrivateConnOptions, roles []structs.Role) (*PrivatePool, error) {
+func NewPrivatePool(opts *conn.ServerPrivateConnOptions, roles []structs.Role, queueSize int) (*PrivatePool, error) {
 	res := &PrivatePool{
 		pools: map[structs.Role]sameRolePool{},
 		opts:  opts,
+		queue: make(chan *conn.Message, queueSize),
 	}
 	for _, r := range roles {
 		res.pools[r] = sameRolePool{conns: map[int64]orderedConn{}, lock: locker.NewLockSystem()}
@@ -71,6 +73,11 @@ func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*co
 	}
 
 	p.pools[acc.Role].conns[acc.Id] = append(p.pools[acc.Role].conns[acc.Id], c)
+	go func(c *conn.ServerPrivateConn) {
+		for msg := range c.ReceiveBuf() {
+			p.queue <- msg
+		}
+	}(c)
 	return c, nil
 }
 
@@ -164,6 +171,10 @@ func (p *PrivatePool) HandleResult(res structs.Result, acc *structs.Account, con
 	for _, upd := range res.GetAccountsToDrop() {
 		p.HandleAccountDrop(upd)
 	}
+}
+
+func (p *PrivatePool) GetQueue() chan *conn.Message {
+	return p.queue
 }
 
 func (p *PrivatePool) Close() {
