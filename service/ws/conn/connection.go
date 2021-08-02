@@ -119,12 +119,12 @@ func newConn(conn *websocket.Conn, opts *Options, needStart bool) (*Conn, error)
 		sendLock:    &sync.Mutex{},
 		wg:          &sync.WaitGroup{},
 		sendBuf:     make(chan proto.Message, opts.SendBufSize),
-		receiveBuf:  make(chan *Message, opts.ReceiveBufSize),
 		sendCloseCh: make(chan bool),
 		pingCloseCh: make(chan bool),
 		opts:        opts,
 	}
 	if needStart {
+		res.receiveBuf = make(chan *Message, opts.ReceiveBufSize)
 		res.start()
 	}
 
@@ -210,12 +210,12 @@ func (c *Conn) listenReceive() {
 		if !c.IsAlive() {
 			break
 		}
-		c.wg.Add(1)
 		if len(c.receiveBuf) == cap(c.receiveBuf) {
 			logger.Log("receive buffer overflow")
 			c.sendOverflowMessage()
 			continue
 		}
+		c.wg.Add(1)
 		select {
 		case c.receiveBuf <- &Message{
 			Conn: c,
@@ -322,7 +322,9 @@ func (c *Conn) Close() {
 		if err := c.conn.Close(); err != nil {
 			logger.Log("ws close conn err: ", err)
 		}
-		close(c.receiveBuf)
+		if c.receiveBuf != nil {
+			close(c.receiveBuf)
+		}
 		close(c.sendBuf)
 		c.conn = nil
 	}

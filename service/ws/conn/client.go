@@ -89,11 +89,12 @@ func newClientConn(url string, header http.Header, opts *ClientPublicConnOptions
 		break
 	}
 	opts.ContentType = header.Get(consts.HeaderContentType)
-	c, err := NewConn(conn, opts.Options)
+	c, err := newConn(conn, opts.Options, false)
 	if err != nil {
 		return nil, err
 	}
-	res :=  &ClientPublicConn{
+	c.receiveBuf = make(chan *Message, opts.ReceiveBufSize)
+	res := &ClientPublicConn{
 		Conn:        c,
 		url:         url,
 		header:      header,
@@ -247,7 +248,7 @@ func NewClientPrivateConnWithRequest(url string, data proto.Message, opts *Clien
 	}
 	header := http.Header{}
 	header.Set(consts.HeaderContentType, opts.ContentType)
-	c, err := NewClientConn(url, header, opts.ClientPublicConnOptions)
+	c, err := newClientConn(url, header, opts.ClientPublicConnOptions, false)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +270,7 @@ func NewClientPrivateConnWithBasic(url, login, pass string, opts *ClientPrivateC
 	header.Set(consts.HeaderContentType, opts.ContentType)
 	header.Set(consts.AuthHeader,
 		fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", login, pass)))))
-	c, err := NewClientConn(url, header, opts.ClientPublicConnOptions)
+	c, err := newClientConn(url, header, opts.ClientPublicConnOptions, false)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +290,7 @@ func NewClientPrivateConnWithToken(url, token string, opts *ClientPrivateConnOpt
 	header := http.Header{}
 	header.Set(consts.HeaderContentType, opts.ContentType)
 	header.Set(consts.AuthHeader, fmt.Sprintf("Bearer %s", token))
-	c, err := NewClientConn(url, header, opts.ClientPublicConnOptions)
+	c, err := newClientConn(url, header, opts.ClientPublicConnOptions, false)
 	if err != nil {
 		return nil, err
 	}

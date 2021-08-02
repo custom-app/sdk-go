@@ -8,12 +8,14 @@ import (
 	"github.com/loyal-inform/sdk-go/util/locker"
 	"google.golang.org/protobuf/proto"
 	"net/http"
+	"time"
 )
 
 type PrivatePool struct {
-	pools map[structs.Role]sameRolePool
-	opts  *conn.ServerPrivateConnOptions
-	queue chan *conn.Message
+	pools   map[structs.Role]sameRolePool
+	opts    *conn.ServerPrivateConnOptions
+	queue   chan *conn.PrivateMessage
+	timeout time.Duration
 }
 
 type sameRolePool struct {
@@ -23,11 +25,13 @@ type sameRolePool struct {
 
 type orderedConn []*conn.ServerPrivateConn
 
-func NewPrivatePool(opts *conn.ServerPrivateConnOptions, roles []structs.Role, queueSize int) (*PrivatePool, error) {
+func NewPrivatePool(opts *conn.ServerPrivateConnOptions, roles []structs.Role,
+	timeout time.Duration, queueSize int) (*PrivatePool, error) {
 	res := &PrivatePool{
-		pools: map[structs.Role]sameRolePool{},
-		opts:  opts,
-		queue: make(chan *conn.Message, queueSize),
+		pools:   map[structs.Role]sameRolePool{},
+		opts:    opts,
+		queue:   make(chan *conn.PrivateMessage, queueSize),
+		timeout: timeout,
 	}
 	for _, r := range roles {
 		res.pools[r] = sameRolePool{conns: map[int64]orderedConn{}, lock: locker.NewLockSystem()}
@@ -75,7 +79,13 @@ func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*co
 	p.pools[acc.Role].conns[acc.Id] = append(p.pools[acc.Role].conns[acc.Id], c)
 	go func(c *conn.ServerPrivateConn) {
 		for msg := range c.ReceiveBuf() {
-			p.queue <- msg
+			select {
+			case p.queue <- msg:
+				break
+			case <-time.After(p.timeout):
+				c.SendBuf() <- p.opts.OverflowMsg
+				break
+			}
 		}
 	}(c)
 	return c, nil
@@ -173,7 +183,7 @@ func (p *PrivatePool) HandleResult(res structs.Result, acc *structs.Account, con
 	}
 }
 
-func (p *PrivatePool) GetQueue() chan *conn.Message {
+func (p *PrivatePool) GetQueue() chan *conn.PrivateMessage {
 	return p.queue
 }
 
@@ -185,4 +195,5 @@ func (p *PrivatePool) Close() {
 			}
 		}
 	}
+	close(p.queue)
 }

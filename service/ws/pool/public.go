@@ -16,15 +16,18 @@ type PublicPool struct {
 	conns    map[int64]*conn.ServerPublicConn
 	connLock *sync.RWMutex
 	opts     *conn.ServerPublicConnOptions
-	queue    chan *conn.Message
+	queue    chan *conn.PublicMessage
+	timeout  time.Duration
 }
 
-func NewPublicPool(opts *conn.ServerPublicConnOptions, queueSize int) (*PublicPool, error) {
+func NewPublicPool(opts *conn.ServerPublicConnOptions,
+	timeout time.Duration, queueSize int) (*PublicPool, error) {
 	res := &PublicPool{
 		conns:    map[int64]*conn.ServerPublicConn{},
 		opts:     opts,
 		connLock: &sync.RWMutex{},
-		queue:    make(chan *conn.Message, queueSize),
+		queue:    make(chan *conn.PublicMessage, queueSize),
+		timeout:  timeout,
 	}
 	opts.Onclose = res.onclose
 	return res, nil
@@ -50,6 +53,13 @@ func (p *PublicPool) AddConnection(w http.ResponseWriter, r *http.Request) (*con
 	c.SetConnId(id)
 	go func(c *conn.ServerPublicConn) {
 		for msg := range c.ReceiveBuf() {
+			select {
+			case p.queue <- msg:
+				break
+			case <-time.After(p.timeout):
+				c.SendBuf() <- p.opts.OverflowMsg
+				break
+			}
 			p.queue <- msg
 		}
 	}(c)
@@ -82,7 +92,7 @@ func (p *PublicPool) HandleResult(res structs.Result) {
 	}
 }
 
-func (p *PublicPool) GetQueue() chan *conn.Message {
+func (p *PublicPool) GetQueue() chan *conn.PublicMessage {
 	return p.queue
 }
 
@@ -90,4 +100,5 @@ func (p *PublicPool) Close() {
 	for _, c := range p.conns {
 		c.Close()
 	}
+	close(p.queue)
 }

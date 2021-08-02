@@ -1,7 +1,6 @@
 package structs
 
 import (
-	"context"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -53,7 +52,3 @@ func (d *DefaultResult) GetSubs() []SubData {
 func (d *DefaultResult) GetAccountsToDrop() []*Account {
 	return d.AccountsToDrop
 }
-
-type SimpleRequestProcessor func(ctx context.Context, acc *Account, req proto.Message) proto.Message
-
-type RequestProcessor func(ctx context.Context, acc *Account, req proto.Message) *Result

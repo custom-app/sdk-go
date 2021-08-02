@@ -33,11 +33,17 @@ type ServerPublicConnOptions struct {
 	Onclose func(int64)
 }
 
+type PublicMessage struct {
+	Conn *ServerPublicConn
+	Data []byte
+}
+
 // ServerPublicConn - соединение с клиентом на стороне сервера
 type ServerPublicConn struct {
 	*Conn
-	opts *ServerPublicConnOptions
-	connId  int64
+	opts       *ServerPublicConnOptions
+	connId     int64
+	receiveBuf chan *PublicMessage
 }
 
 func fillServerPublicOptions(opts *ServerPublicConnOptions) error {
@@ -47,14 +53,14 @@ func fillServerPublicOptions(opts *ServerPublicConnOptions) error {
 	return fillOpts(opts.Options)
 }
 
-func NewServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions) (*ServerPublicConn, error) {
+func newServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions, needStart bool) (*ServerPublicConn, error) {
 	if opts == nil {
 		return nil, OptsRequiredErr
 	}
 	if err := fillServerPublicOptions(opts); err != nil {
 		return nil, err
 	}
-	c, err := NewConn(conn, opts.Options)
+	c, err := newConn(conn, opts.Options, false)
 	if err != nil {
 		return nil, err
 	}
@@ -62,8 +68,15 @@ func NewServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions) (*
 		Conn: c,
 		opts: opts,
 	}
-	res.start()
+	if needStart {
+		res.receiveBuf = make(chan *PublicMessage, opts.ReceiveBufSize)
+		res.start()
+	}
 	return res, nil
+}
+
+func NewServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions) (*ServerPublicConn, error) {
+	return newServerPublicConn(conn, opts, true)
 }
 
 func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
@@ -85,6 +98,56 @@ func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter
 	return NewServerPublicConn(conn, opts)
 }
 
+func (c *ServerPublicConn) start() {
+	go c.pingPong()
+	go c.listenReceiveWithStop()
+	go c.listenSend()
+}
+
+func (c *ServerPublicConn) listenReceive() {
+	for {
+		_, msg, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err, allCodes...) {
+				logger.Log("normal close")
+			} else if websocket.IsUnexpectedCloseError(err, allCodes...) {
+				logger.Log("unexpected close")
+			} else {
+				logger.Log("ws read message err: ", err)
+			}
+			break
+		}
+		if !c.IsAlive() {
+			break
+		}
+		if len(c.receiveBuf) == cap(c.receiveBuf) {
+			logger.Log("receive buffer overflow")
+			c.sendOverflowMessage()
+			continue
+		}
+		c.wg.Add(1)
+		select {
+		case c.receiveBuf <- &PublicMessage{
+			Conn: c,
+			Data: msg,
+		}:
+			break
+		case <-time.After(c.opts.ReceiveBufTimeout):
+			c.wg.Done()
+			c.sendOverflowMessage()
+		}
+	}
+}
+
+func (c *ServerPublicConn) listenReceiveWithStop() {
+	c.listenReceive()
+	c.Close()
+}
+
+func (c *ServerPublicConn) ReceiveBuf() chan *PublicMessage {
+	return c.receiveBuf
+}
+
 func (c *ServerPublicConn) SetConnId(value int64) {
 	c.connId = value
 }
@@ -95,6 +158,7 @@ func (c *ServerPublicConn) ConnId() int64 {
 
 func (c *ServerPublicConn) Close() {
 	c.Conn.Close()
+	close(c.receiveBuf)
 	if c.opts.Onclose != nil {
 		c.opts.Onclose(c.connId)
 	}
@@ -111,6 +175,11 @@ type AuthRes struct {
 	Account *structs.Account
 }
 
+type PrivateMessage struct {
+	Conn *ServerPrivateConn
+	Data []byte
+}
+
 // ServerPrivateConn - авторизованное соединение с клиентом на стороне сервера
 type ServerPrivateConn struct {
 	*ServerPublicConn
@@ -119,6 +188,7 @@ type ServerPrivateConn struct {
 	accLock    *sync.RWMutex
 	authChLock *sync.Mutex
 	authCh     chan *AuthRes
+	receiveBuf chan *PrivateMessage
 }
 
 func fillServerPrivateOptions(opts *ServerPrivateConnOptions) error {
@@ -135,16 +205,18 @@ func NewServerPrivateConn(conn *websocket.Conn, opts *ServerPrivateConnOptions) 
 	if err := fillServerPrivateOptions(opts); err != nil {
 		return nil, err
 	}
-	c, err := NewServerPublicConn(conn, opts.ServerPublicConnOptions)
+	c, err := newServerPublicConn(conn, opts.ServerPublicConnOptions, false)
 	if err != nil {
 		return nil, err
 	}
+	c.start()
 	return &ServerPrivateConn{
 		opts:             opts,
 		ServerPublicConn: c,
 		accLock:          &sync.RWMutex{},
 		authCh:           make(chan *AuthRes),
 		authChLock:       &sync.Mutex{},
+		receiveBuf:       make(chan *PrivateMessage, opts.ReceiveBufSize),
 	}, nil
 }
 
@@ -267,6 +339,12 @@ func UpgradePrivateServerConn(upgrader *websocket.Upgrader, w http.ResponseWrite
 	}
 }
 
+func (c *ServerPrivateConn) start() {
+	go c.pingPong()
+	go c.listenReceiveWithStop()
+	go c.listenSend()
+}
+
 func (c *ServerPrivateConn) auth() (*AuthRes, error) {
 	select {
 	case res := <-c.authCh:
@@ -285,6 +363,50 @@ func (c *ServerPrivateConn) AuthConfirm(res *AuthRes) {
 		c.authCh <- res
 	}
 	c.authChLock.Unlock()
+}
+
+func (c *ServerPrivateConn) listenReceive() {
+	for {
+		_, msg, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err, allCodes...) {
+				logger.Log("normal close")
+			} else if websocket.IsUnexpectedCloseError(err, allCodes...) {
+				logger.Log("unexpected close")
+			} else {
+				logger.Log("ws read message err: ", err)
+			}
+			break
+		}
+		if !c.IsAlive() {
+			break
+		}
+		if len(c.receiveBuf) == cap(c.receiveBuf) {
+			logger.Log("receive buffer overflow")
+			c.sendOverflowMessage()
+			continue
+		}
+		c.wg.Add(1)
+		select {
+		case c.receiveBuf <- &PrivateMessage{
+			Conn: c,
+			Data: msg,
+		}:
+			break
+		case <-time.After(c.opts.ReceiveBufTimeout):
+			c.wg.Done()
+			c.sendOverflowMessage()
+		}
+	}
+}
+
+func (c *ServerPrivateConn) listenReceiveWithStop() {
+	c.listenReceive()
+	c.Close()
+}
+
+func (c *ServerPrivateConn) ReceiveBuf() chan *PrivateMessage {
+	return c.receiveBuf
 }
 
 func (c *ServerPrivateConn) ConnId() int64 {
@@ -306,6 +428,7 @@ func (c *ServerPrivateConn) SetAccount(acc *structs.Account) {
 
 func (c *ServerPrivateConn) Close() {
 	c.Conn.Close()
+	close(c.receiveBuf)
 	if c.opts.Onclose != nil {
 		c.opts.Onclose(c.account, c.connId)
 	}

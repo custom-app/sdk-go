@@ -1,138 +1,123 @@
 package job
 
 import (
-	"context"
 	"errors"
-	"github.com/jackc/pgx/v4"
-	"github.com/loyal-inform/sdk-go/db/pg"
-	"github.com/loyal-inform/sdk-go/structs"
+	http2 "github.com/loyal-inform/sdk-go/service/http"
+	"github.com/loyal-inform/sdk-go/util/consts"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"net/http"
 	"time"
 )
 
 var (
-	TimeoutError = errors.New("operation timeout")
+	marshaler = &protojson.MarshalOptions{
+		UseProtoNames:   true,
+		UseEnumNumbers:  true,
+		EmitUnpopulated: true,
+	}
+	OptsRequiredErr = errors.New("opts required")
 )
 
-type DatabaseQueue struct {
-	ch chan bool
+const (
+	defaultBufTimeout = 10 * time.Second
+	defaultQueueSize  = 4
+)
+
+type HttpJob struct {
+	W       http.ResponseWriter
+	R       *http.Request
+	Handler http.Handler
 }
 
-type DatabaseWorker func(ctx context.Context, tx *pg.Transaction) error
-
-type DatabaseWorkerWithResponse func(ctx context.Context, tx *pg.Transaction) proto.Message
-
-type DatabaseWorkerWithResult func(ctx context.Context, tx *pg.Transaction) *structs.Result
-
-func NewQueue(size int) *DatabaseQueue {
-	res := &DatabaseQueue{
-		ch: make(chan bool, size),
-	}
-	for i := 0; i < size; i++ {
-		res.ch <- true
-	}
-	return res
+type HttpQueueOptions struct {
+	QueueSize                         int
+	Timeout                           time.Duration
+	OverflowCode                      int
+	OverflowMsg                       proto.Message
+	OverflowMsgProto, OverflowMsgJson []byte
 }
 
-func (q *DatabaseQueue) acquireResources(ctx context.Context) error {
-	select {
-	case <-q.ch:
-		return nil
-	case <-ctx.Done():
-		return TimeoutError
-	}
+type HttpQueue struct {
+	ch   chan *HttpJob
+	opts *HttpQueueOptions
 }
 
-func (q *DatabaseQueue) releaseResource() {
-	q.ch <- true
+func fillOpts(opts *HttpQueueOptions) error {
+	var err error
+	if opts.OverflowMsgJson == nil {
+		opts.OverflowMsgJson, err = marshaler.Marshal(opts.OverflowMsg)
+		if err != nil {
+			return err
+		}
+	}
+	if opts.OverflowMsgProto == nil {
+		opts.OverflowMsgProto, err = proto.Marshal(opts.OverflowMsg)
+		if err != nil {
+			return err
+		}
+	}
+	if opts.Timeout == 0 {
+		opts.Timeout = defaultBufTimeout
+	}
+	if opts.QueueSize == 0 {
+		opts.QueueSize = defaultQueueSize
+	}
+	if opts.OverflowCode == 0 {
+		opts.OverflowCode = http.StatusTooManyRequests
+	}
+	return nil
 }
 
-func (q *DatabaseQueue) MakeJob(ctx context.Context, options pgx.TxOptions,
-	worker DatabaseWorker, timeout time.Duration) error {
-	var cancel func()
-	ctx, cancel = context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if err := q.acquireResources(ctx); err != nil {
-		return err
+func NewQueue(opts *HttpQueueOptions) (*HttpQueue, error) {
+	if opts == nil {
+		return nil, OptsRequiredErr
 	}
-	defer q.releaseResource()
-	tx, err := pg.NewTransaction(options)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	resCh := make(chan error)
-	go func() {
-		resCh <- worker(ctx, tx)
-	}()
-	var res error
-	select {
-	case <-ctx.Done():
-		tx.Rollback()
-		res = <-resCh
-		break
-	case res = <-resCh:
-		break
-	}
-	return res
-}
-
-func (q *DatabaseQueue) MakeJobWithResponse(ctx context.Context, options pgx.TxOptions,
-	worker DatabaseWorkerWithResponse, timeout time.Duration) (proto.Message, error) {
-	var cancel func()
-	ctx, cancel = context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if err := q.acquireResources(ctx); err != nil {
+	if err := fillOpts(opts); err != nil {
 		return nil, err
 	}
-	defer q.releaseResource()
-	tx, err := pg.NewTransaction(options)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	resCh := make(chan proto.Message)
-	go func() {
-		resCh <- worker(ctx, tx)
-	}()
-	var res proto.Message
-	select {
-	case <-ctx.Done():
-		tx.Rollback()
-		res = <-resCh
-		break
-	case res = <-resCh:
-		break
+	res := &HttpQueue{
+		ch:   make(chan *HttpJob, opts.QueueSize),
+		opts: opts,
 	}
 	return res, nil
 }
 
-func (q *DatabaseQueue) MakeJobWithResult(ctx context.Context, options pgx.TxOptions,
-	worker DatabaseWorkerWithResult, timeout time.Duration) (*structs.Result, error) {
-	var cancel func()
-	ctx, cancel = context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if err := q.acquireResources(ctx); err != nil {
-		return nil, err
-	}
-	defer q.releaseResource()
-	tx, err := pg.NewTransaction(options)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	resCh := make(chan *structs.Result)
-	go func() {
-		resCh <- worker(ctx, tx)
-	}()
-	var res *structs.Result
+func (q *HttpQueue) AddJob(job *HttpJob) {
 	select {
-	case <-ctx.Done():
-		tx.Rollback()
-		res = <-resCh
+	case q.ch <- job:
 		break
-	case res = <-resCh:
+	case <-time.After(q.opts.Timeout):
+		q.sendOverflow(job)
+		break
+	case <-job.R.Context().Done():
+		q.sendOverflow(job)
 		break
 	}
-	return res, nil
+}
+
+func (q *HttpQueue) Handler(handler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q.AddJob(&HttpJob{
+			W:       w,
+			R:       r,
+			Handler: handler,
+		})
+	})
+}
+
+func (q *HttpQueue) sendOverflow(job *HttpJob) {
+	if job.R.Header.Get(consts.HeaderContentType) == consts.JsonContentType {
+		http2.SendBytes(job.W, q.opts.OverflowCode, q.opts.OverflowMsgJson)
+	} else {
+		http2.SendBytes(job.W, q.opts.OverflowCode, q.opts.OverflowMsgProto)
+	}
+}
+
+func (q *HttpQueue) GetQueue() chan *HttpJob {
+	return q.ch
+}
+
+func (q *HttpQueue) Close() {
+	close(q.ch)
 }

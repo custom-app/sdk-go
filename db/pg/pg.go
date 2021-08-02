@@ -127,11 +127,11 @@ func (r *Request) RowsAffected() int64 {
 	return r.tag.RowsAffected()
 }
 
-func (r *Request) Exec() error {
+func (r *Request) Exec(ctx context.Context) error {
 	if r.t != nil {
-		r.tag, r.err = r.t.tx.Exec(context.Background(), r.query, r.params...)
+		r.tag, r.err = r.t.tx.Exec(ctx, r.query, r.params...)
 	} else {
-		r.tag, r.err = db.Exec(context.Background(), r.query, r.params...)
+		r.tag, r.err = db.Exec(ctx, r.query, r.params...)
 	}
 	if r.err != nil {
 		logError("request exec", r.err)
@@ -139,11 +139,11 @@ func (r *Request) Exec() error {
 	return r.err
 }
 
-func (r *Request) Query() error {
+func (r *Request) Query(ctx context.Context) error {
 	if r.t != nil {
-		r.rows, r.err = r.t.tx.Query(context.Background(), r.query, r.params...)
+		r.rows, r.err = r.t.tx.Query(ctx, r.query, r.params...)
 	} else {
-		r.rows, r.err = db.Query(context.Background(), r.query, r.params...)
+		r.rows, r.err = db.Query(ctx, r.query, r.params...)
 	}
 	if r.err == nil {
 		r.next = r.rows.Next()
@@ -160,11 +160,11 @@ func (r *Request) Query() error {
 	return r.err
 }
 
-func (r *Request) QueryRow() {
+func (r *Request) QueryRow(ctx context.Context) {
 	if r.t != nil {
-		r.row = r.t.tx.QueryRow(context.Background(), r.query, r.params...)
+		r.row = r.t.tx.QueryRow(ctx, r.query, r.params...)
 	} else {
-		r.row = db.QueryRow(context.Background(), r.query, r.params...)
+		r.row = db.QueryRow(ctx, r.query, r.params...)
 	}
 }
 
@@ -231,11 +231,11 @@ func (b *Batch) AddRequest(query string, params ...interface{}) {
 	b.b.Queue(query, params...)
 }
 
-func (b *Batch) Send() {
+func (b *Batch) Send(ctx context.Context) {
 	if b.t != nil {
-		b.res = b.t.tx.SendBatch(context.Background(), b.b)
+		b.res = b.t.tx.SendBatch(ctx, b.b)
 	} else {
-		b.res = db.SendBatch(context.Background(), b.b)
+		b.res = db.SendBatch(ctx, b.b)
 	}
 }
 
@@ -315,8 +315,8 @@ type Transaction struct {
 	err         error
 }
 
-func NewTransaction(opts pgx.TxOptions) (*Transaction, error) {
-	tx, err := db.BeginTx(context.Background(), opts)
+func NewTransaction(ctx context.Context, opts pgx.TxOptions) (*Transaction, error) {
+	tx, err := db.BeginTx(ctx, opts)
 	if err != nil {
 		logError("begin tx", err)
 		return nil, err
@@ -326,8 +326,8 @@ func NewTransaction(opts pgx.TxOptions) (*Transaction, error) {
 	}, nil
 }
 
-func (t *Transaction) Commit() error {
-	if err := t.tx.Commit(context.Background()); err != nil {
+func (t *Transaction) Commit(ctx context.Context) error {
+	if err := t.tx.Commit(ctx); err != nil {
 		logError("commit tx", err)
 		return err
 	}
@@ -335,9 +335,9 @@ func (t *Transaction) Commit() error {
 	return nil
 }
 
-func (t *Transaction) Rollback() {
+func (t *Transaction) Rollback(ctx context.Context) {
 	if !t.isCommitted {
-		if err := t.tx.Rollback(context.Background()); err != nil {
+		if err := t.tx.Rollback(ctx); err != nil {
 			logError("rollback tx", err)
 		}
 	}
