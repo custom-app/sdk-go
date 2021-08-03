@@ -11,7 +11,7 @@ import (
 )
 
 type Scannable interface {
-	Query() error
+	Query(ctx context.Context) error
 	Scan(...interface{}) error
 	HaveNext() bool
 	Close()
@@ -243,7 +243,7 @@ func (b *Batch) RowsAffected() int64 {
 	return b.tag.RowsAffected()
 }
 
-func (b *Batch) Exec() error {
+func (b *Batch) Exec(_ context.Context) error {
 	b.tag, b.err = b.res.Exec()
 	if b.err != nil {
 		logError("batch exec", b.err)
@@ -251,7 +251,7 @@ func (b *Batch) Exec() error {
 	return b.err
 }
 
-func (b *Batch) Query() error {
+func (b *Batch) Query(_ context.Context) error {
 	b.rows, b.err = b.res.Query()
 	if b.err == nil {
 		b.next = b.rows.Next()

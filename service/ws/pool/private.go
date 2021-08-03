@@ -26,7 +26,7 @@ type sameRolePool struct {
 type orderedConn []*conn.ServerPrivateConn
 
 func NewPrivatePool(opts *conn.ServerPrivateConnOptions, roles []structs.Role,
-	timeout time.Duration, queueSize int) (*PrivatePool, error) {
+	timeout time.Duration, queueSize int) *PrivatePool {
 	res := &PrivatePool{
 		pools:   map[structs.Role]sameRolePool{},
 		opts:    opts,
@@ -37,7 +37,7 @@ func NewPrivatePool(opts *conn.ServerPrivateConnOptions, roles []structs.Role,
 		res.pools[r] = sameRolePool{conns: map[int64]orderedConn{}, lock: locker.NewLockSystem()}
 	}
 	opts.Onclose = res.onclose
-	return res, nil
+	return res
 }
 
 func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*conn.ServerPrivateConn, error) {

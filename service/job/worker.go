@@ -18,6 +18,26 @@ func (w *HttpWorker) Run() {
 	}
 }
 
+type WsWorker struct {
+	queue   chan *conn.Message
+	handler WsHandler
+}
+
+type WsHandler func(msg *conn.Message)
+
+func NewWsWorker(queue chan *conn.Message, handler WsHandler) *WsWorker {
+	return &WsWorker{
+		queue:   queue,
+		handler: handler,
+	}
+}
+
+func (w *WsWorker) Run() {
+	for msg := range w.queue {
+		w.handler(msg)
+	}
+}
+
 type WsPrivateWorker struct {
 	queue   chan *conn.PrivateMessage
 	handler WsPrivateHandler

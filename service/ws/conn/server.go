@@ -95,7 +95,12 @@ func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter
 	if err := r.Body.Close(); err != nil {
 		return nil, err
 	}
-	return NewServerPublicConn(conn, opts)
+	res, err := NewServerPublicConn(conn, opts)
+	if err != nil {
+		return nil, err
+	}
+	res.contentType = r.Header.Get(consts.HeaderContentType)
+	return res, nil
 }
 
 func (c *ServerPublicConn) start() {
@@ -304,6 +309,8 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 	}
 	authRes, err := res.auth()
 	if err != nil {
+		_, e := opts.AuthOptions.ErrorMapper(err)
+		res.sendBuf <- e
 		logger.Log("auth wait failed. closing connection")
 		res.Close()
 		return nil, err
@@ -326,17 +333,26 @@ func UpgradePrivateServerConn(upgrader *websocket.Upgrader, w http.ResponseWrite
 	isToken := strings.HasPrefix(a, consts.TokenStart)
 	login, password, isBasic := r.BasicAuth()
 	platform, versions := http2.ParseVersionHeader(r.Header, opts.AuthOptions.VersionHeader)
+	var (
+		res *ServerPrivateConn
+		err error
+	)
 	if isToken && opts.AuthOptions.TokenAllowed {
-		return privateServerConnViaToken(upgrader, w, r, opts, platform, versions, a)
+		res, err = privateServerConnViaToken(upgrader, w, r, opts, platform, versions, a)
 	} else if isBasic && opts.AuthOptions.BasicAllowed {
-		return privateServerConnViaBasic(upgrader, w, r, opts, platform, versions, login, password)
+		res, err = privateServerConnViaBasic(upgrader, w, r, opts, platform, versions, login, password)
 	} else if opts.AuthOptions.RequestAllowed {
-		return privateServerConnViaRequest(upgrader, w, r, opts)
+		res, err = privateServerConnViaRequest(upgrader, w, r, opts)
 	} else {
 		code, e := opts.AuthOptions.ErrorMapper(auth.FailedAuthErr)
 		http2.SendResponseWithContentType(w, r, code, e)
-		return nil, auth.FailedAuthErr
+		res, err = nil, auth.FailedAuthErr
 	}
+	if err != nil {
+		return nil, err
+	}
+	res.contentType = r.Header.Get(consts.HeaderContentType)
+	return res, nil
 }
 
 func (c *ServerPrivateConn) start() {

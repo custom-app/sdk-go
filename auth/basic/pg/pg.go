@@ -8,7 +8,7 @@ import (
 	"github.com/loyal-inform/sdk-go/auth"
 	pg2 "github.com/loyal-inform/sdk-go/auth/pg"
 	"github.com/loyal-inform/sdk-go/db/pg"
-	"github.com/loyal-inform/sdk-go/service/job"
+	pg3 "github.com/loyal-inform/sdk-go/service/job/pg"
 	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"time"
@@ -21,12 +21,12 @@ type RoleQuery struct {
 
 type AuthorizationMaker struct {
 	roleQueries   []RoleQuery
-	queue         *job.DatabaseQueue
 	authTimeout   time.Duration
 	accountLoader pg2.AccountLoader
+	queue         *pg3.Queue
 }
 
-func NewMaker(roleQueries []RoleQuery, queue *job.DatabaseQueue, loader pg2.AccountLoader,
+func NewMaker(roleQueries []RoleQuery, queue *pg3.Queue, loader pg2.AccountLoader,
 	authTimeout time.Duration) *AuthorizationMaker {
 	res := &AuthorizationMaker{
 		roleQueries:   make([]RoleQuery, len(roleQueries)),
@@ -41,14 +41,20 @@ func NewMaker(roleQueries []RoleQuery, queue *job.DatabaseQueue, loader pg2.Acco
 func (m *AuthorizationMaker) Auth(ctx context.Context, login, password string, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, error) {
 	var acc *structs.Account
-	if err := m.queue.MakeJob(ctx, pgx.TxOptions{}, func(ctx context.Context, tx *pg.Transaction) error {
-		var err error
-		acc, err = m.findUserForLoginPass(tx, login, password, disabled...)
-		if err != nil {
-			return err
-		}
-		return nil
-	}, m.authTimeout); err != nil {
+	if err := m.queue.MakeJob(&pg3.Task{
+		Ctx:          ctx,
+		Options:      pgx.TxOptions{},
+		QueueTimeout: time.Second,
+		Timeout:      m.authTimeout,
+		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+			var err error
+			acc, err = m.findUserForLoginPass(ctx, tx, login, password, disabled...)
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	}); err != nil {
 		return nil, err
 	}
 	acc.Platform, acc.Versions = platform, versions
@@ -61,15 +67,21 @@ func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, login, password s
 		acc  *structs.Account
 		resp proto.Message
 	)
-	if err := m.queue.MakeJob(ctx, pgx.TxOptions{}, func(ctx context.Context, tx *pg.Transaction) error {
-		var err error
-		acc, err = m.findUserForLoginPass(tx, login, password, disabled...)
-		if err != nil {
-			return err
-		}
-		resp, err = m.accountLoader(tx, acc)
-		return err
-	}, m.authTimeout); err != nil {
+	if err := m.queue.MakeJob(&pg3.Task{
+		Ctx:          ctx,
+		Options:      pgx.TxOptions{},
+		QueueTimeout: time.Second,
+		Timeout:      m.authTimeout,
+		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+			var err error
+			acc, err = m.findUserForLoginPass(ctx, tx, login, password, disabled...)
+			if err != nil {
+				return err
+			}
+			resp = m.accountLoader(ctx, tx, acc)
+			return nil
+		},
+	}); err != nil {
 		return nil, nil, err
 	}
 	acc.Platform, acc.Versions = platform, versions
@@ -85,7 +97,8 @@ func HashedPassword(password string) (string, error) {
 	return hex.EncodeToString(toCheck[:]), nil
 }
 
-func (m *AuthorizationMaker) findUserForLoginPass(tx *pg.Transaction, login, password string, disabled ...structs.Role) (*structs.Account, error) {
+func (m *AuthorizationMaker) findUserForLoginPass(ctx context.Context, tx *pg.Transaction,
+	login, password string, disabled ...structs.Role) (*structs.Account, error) {
 	pass, err := HashedPassword(password)
 	if err != nil {
 		return nil, err
@@ -102,7 +115,7 @@ func (m *AuthorizationMaker) findUserForLoginPass(tx *pg.Transaction, login, pas
 			continue
 		}
 		getReq := tx.NewRequest(query.Query, login, pass)
-		if err := getReq.Query(); err != nil {
+		if err := getReq.Query(ctx); err != nil {
 			return nil, err
 		}
 		if getReq.IsEmpty() {

@@ -21,7 +21,7 @@ type PublicPool struct {
 }
 
 func NewPublicPool(opts *conn.ServerPublicConnOptions,
-	timeout time.Duration, queueSize int) (*PublicPool, error) {
+	timeout time.Duration, queueSize int) *PublicPool {
 	res := &PublicPool{
 		conns:    map[int64]*conn.ServerPublicConn{},
 		opts:     opts,
@@ -30,7 +30,7 @@ func NewPublicPool(opts *conn.ServerPublicConnOptions,
 		timeout:  timeout,
 	}
 	opts.Onclose = res.onclose
-	return res, nil
+	return res
 }
 
 func (p *PublicPool) AddConnection(w http.ResponseWriter, r *http.Request) (*conn.ServerPublicConn, error) {

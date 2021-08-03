@@ -60,9 +60,10 @@ type Options struct {
 }
 
 type Conn struct {
-	conn    *websocket.Conn // собственно, соединение
-	opts    *Options
-	isAlive int32 // счетчик для определения, живо ли соединение
+	conn        *websocket.Conn // собственно, соединение
+	opts        *Options
+	contentType string
+	isAlive     int32 // счетчик для определения, живо ли соединение
 
 	sendLock                 *sync.Mutex        // мутекс для последовательной обработки отправки/пинга/закрытия
 	wg                       *sync.WaitGroup    // processing messages count
@@ -115,6 +116,7 @@ func newConn(conn *websocket.Conn, opts *Options, needStart bool) (*Conn, error)
 		return nil, err
 	}
 	res := &Conn{
+		contentType: opts.ContentType,
 		conn:        conn,
 		sendLock:    &sync.Mutex{},
 		wg:          &sync.WaitGroup{},
@@ -144,7 +146,12 @@ func UpgradeConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Re
 	if err != nil {
 		return nil, err
 	}
-	return NewConn(conn, opts)
+	res, err := NewConn(conn, opts)
+	if err != nil {
+		return nil, err
+	}
+	res.contentType = r.Header.Get(consts.HeaderContentType)
+	return res, nil
 }
 
 func (c *Conn) start() {
@@ -239,7 +246,9 @@ L:
 	for {
 		select {
 		case data := <-c.sendBuf:
-			c.sendProto(data)
+			if data != nil {
+				c.sendProto(data)
+			}
 			c.wg.Done()
 			break
 		case <-c.sendCloseCh:
