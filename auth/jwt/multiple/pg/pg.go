@@ -135,6 +135,21 @@ func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, token string, pur
 	return acc, number, resp, nil
 }
 
+func (m *AuthorizationMaker) Logout(ctx context.Context, role structs.Role, id int64) error {
+	return m.queue.MakeJob(&pg3.Task{
+		Ctx:          ctx,
+		Options:      pgx.TxOptions{},
+		QueueTimeout: time.Second,
+		Timeout:      m.authTimeout,
+		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+			if err := m.DropAllTokens(ctx, tx, role, id); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		},
+	})
+}
+
 func (m *AuthorizationMaker) parseToken(token string) (*jwt.Token, error) {
 	res, err := jwt.Parse(token, func(token *jwt.Token) (i interface{}, e error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {

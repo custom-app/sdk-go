@@ -131,6 +131,24 @@ func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, token string, pur
 	return acc, resp, nil
 }
 
+func (m *AuthorizationMaker) Logout(ctx context.Context, role structs.Role, id int64) error {
+	return m.queue.MakeJob(&pg3.Task{
+		Ctx:          ctx,
+		Options:      pgx.TxOptions{},
+		QueueTimeout: time.Second,
+		Timeout:      m.authTimeout,
+		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+			if err := m.dropToken(ctx, tx, role, id, structs.PurposeAccess); err != nil {
+				return err
+			}
+			if err := m.dropToken(ctx, tx, role, id, structs.PurposeRefresh); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
+		},
+	})
+}
+
 func (m *AuthorizationMaker) parseToken(token string) (*jwt.Token, error) {
 	res, err := jwt.Parse(token, func(token *jwt.Token) (i interface{}, e error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -229,8 +247,7 @@ func GenerateSecret(role structs.Role, id int64, purpose structs.Purpose) string
 
 func (m *AuthorizationMaker) setSecret(ctx context.Context, tx *pg.Transaction, role structs.Role,
 	id int64, purpose structs.Purpose, secret string, expires time.Time) error {
-	dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where id=$1 and purpose=$2", m.tokenTables[role]), id, purpose)
-	if err := dropReq.Exec(ctx); err != nil {
+	if err := m.dropToken(ctx, tx, role, id, purpose); err != nil {
 		return err
 	}
 	insertReq := tx.NewRequest(fmt.Sprintf("insert into %s values($1,$2,$3,$4)", m.tokenTables[role]),
@@ -282,4 +299,13 @@ func (m *AuthorizationMaker) createTokens(ctx context.Context, tx *pg.Transactio
 		return "", 0, "", 0, e
 	}
 	return accessToken, accessExpiresAt.UnixNano() / 1e+6, refreshToken, refreshExpiresAt.UnixNano() / 1e+6, nil
+}
+
+func (m *AuthorizationMaker) dropToken(ctx context.Context, tx *pg.Transaction,
+	role structs.Role, id int64, purpose structs.Purpose) error {
+	dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where id=$1 and purpose=$2", m.tokenTables[role]), id, purpose)
+	if err := dropReq.Exec(ctx); err != nil {
+		return err
+	}
+	return nil
 }

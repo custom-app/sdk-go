@@ -88,6 +88,10 @@ func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, login, password s
 	return acc, resp, nil
 }
 
+func (m *AuthorizationMaker) Logout(ctx context.Context, role structs.Role, id int64) error {
+	return nil
+}
+
 func HashedPassword(password string) (string, error) {
 	pass, err := hex.DecodeString(password)
 	if err != nil {
