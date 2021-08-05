@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -163,7 +164,9 @@ func (c *ServerPublicConn) ConnId() int64 {
 
 func (c *ServerPublicConn) Close() {
 	c.Conn.Close()
-	close(c.receiveBuf)
+	if c.receiveBuf != nil {
+		close(c.receiveBuf)
+	}
 	if c.opts.Onclose != nil {
 		c.opts.Onclose(c.connId)
 	}
@@ -173,6 +176,7 @@ type ServerPrivateConnOptions struct {
 	*ServerPublicConnOptions
 	AuthOptions *AuthOptions
 	Onclose     func(*structs.Account, int64)
+	Onauth      func(c *ServerPrivateConn)
 }
 
 type AuthRes struct {
@@ -214,15 +218,16 @@ func NewServerPrivateConn(conn *websocket.Conn, opts *ServerPrivateConnOptions) 
 	if err != nil {
 		return nil, err
 	}
-	c.start()
-	return &ServerPrivateConn{
+	res := &ServerPrivateConn{
 		opts:             opts,
 		ServerPublicConn: c,
 		accLock:          &sync.RWMutex{},
 		authCh:           make(chan *AuthRes),
 		authChLock:       &sync.Mutex{},
 		receiveBuf:       make(chan *PrivateMessage, opts.ReceiveBufSize),
-	}, nil
+	}
+	go res.start()
+	return res, nil
 }
 
 func privateServerConnViaToken(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
@@ -261,7 +266,8 @@ func privateServerConnViaToken(upgrader *websocket.Upgrader, w http.ResponseWrit
 		return nil, err
 	}
 	res.SetAccount(acc)
-	res.sendBuf <- resp
+	res.sendProto(resp)
+	res.opts.Onauth(res)
 	return res, nil
 }
 
@@ -290,7 +296,8 @@ func privateServerConnViaBasic(upgrader *websocket.Upgrader, w http.ResponseWrit
 		return nil, err
 	}
 	res.SetAccount(acc)
-	res.sendBuf <- resp
+	res.sendProto(resp)
+	res.opts.Onauth(res)
 	return res, nil
 }
 
@@ -307,16 +314,18 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 	if err != nil {
 		return nil, err
 	}
-	authRes, err := res.auth()
-	if err != nil {
-		_, e := opts.AuthOptions.ErrorMapper(err)
-		res.sendBuf <- e
-		logger.Log("auth wait failed. closing connection")
-		res.Close()
-		return nil, err
-	}
-	res.SetAccount(authRes.Account)
-	res.sendBuf <- authRes.Resp
+	go func() {
+		authRes, err := res.auth()
+		if err != nil {
+			_, e := opts.AuthOptions.ErrorMapper(err)
+			res.sendProto(e)
+			logger.Log("auth wait failed. closing connection")
+			res.Close()
+		}
+		res.SetAccount(authRes.Account)
+		res.sendProto(authRes.Resp)
+		res.opts.Onauth(res)
+	}()
 	return res, nil
 }
 
@@ -365,6 +374,7 @@ func (c *ServerPrivateConn) auth() (*AuthRes, error) {
 	select {
 	case res := <-c.authCh:
 		c.authChLock.Lock()
+		close(c.authCh)
 		c.authCh = nil
 		c.authChLock.Unlock()
 		return res, nil
@@ -443,9 +453,11 @@ func (c *ServerPrivateConn) SetAccount(acc *structs.Account) {
 }
 
 func (c *ServerPrivateConn) Close() {
-	c.Conn.Close()
-	close(c.receiveBuf)
-	if c.opts.Onclose != nil {
-		c.opts.Onclose(c.account, c.connId)
+	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
+		c.ServerPublicConn.Close()
+		close(c.receiveBuf)
+		if c.opts.Onclose != nil && c.account != nil {
+			c.opts.Onclose(c.account, c.connId)
+		}
 	}
 }

@@ -39,6 +39,11 @@ type ClientPublicConnOptions struct {
 	RetryPeriod, SubTimeout time.Duration
 }
 
+type ClientPublicMessage struct {
+	Data []byte
+	Conn *ClientPublicConn
+}
+
 // ClientPublicConn - клиентское соединение с сервером без авторизации
 type ClientPublicConn struct {
 	*Conn
@@ -46,6 +51,7 @@ type ClientPublicConn struct {
 	url         string
 	header      http.Header
 	needRestart bool
+	receiveBuf  chan *ClientPublicMessage
 
 	subData     map[structs.SubKind]clientSubData
 	subDataLock *sync.RWMutex
@@ -93,8 +99,8 @@ func newClientConn(url string, header http.Header, opts *ClientPublicConnOptions
 	if err != nil {
 		return nil, err
 	}
-	c.receiveBuf = make(chan *Message, opts.ReceiveBufSize)
 	res := &ClientPublicConn{
+		opts:        opts,
 		Conn:        c,
 		url:         url,
 		header:      header,
@@ -104,6 +110,7 @@ func newClientConn(url string, header http.Header, opts *ClientPublicConnOptions
 	}
 	if needStart {
 		res.start()
+		c.receiveBuf = make(chan *ReceivedMessage, opts.ReceiveBufSize)
 	}
 	return res, nil
 }
@@ -197,12 +204,56 @@ func (c *ClientPublicConn) restartSubs() {
 }
 
 func (c *ClientPublicConn) listenReceive() {
-	c.Conn.listenReceive()
+	for {
+		_, msg, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err, allCodes...) {
+				logger.Log("normal close")
+			} else if websocket.IsUnexpectedCloseError(err, allCodes...) {
+				logger.Log("unexpected close")
+			} else {
+				logger.Log("ws read message err: ", err)
+			}
+			break
+		}
+		if !c.IsAlive() {
+			break
+		}
+		if len(c.receiveBuf) == cap(c.receiveBuf) {
+			logger.Log("receive buffer overflow")
+			c.sendOverflowMessage()
+			continue
+		}
+		select {
+		case c.receiveBuf <- &ClientPublicMessage{
+			Conn: c,
+			Data: msg,
+		}:
+			break
+		case <-time.After(c.opts.ReceiveBufTimeout):
+			c.sendOverflowMessage()
+		}
+	}
 	if c.IsAlive() {
 		c.pingCloseCh <- true
 		c.sendCloseCh <- true
 	}
 	c.restart()
+}
+
+func (c *ClientPublicConn) listenSend() {
+L:
+	for {
+		select {
+		case data := <-c.sendBuf:
+			if data != nil {
+				c.sendProto(data)
+			}
+			break
+		case <-c.sendCloseCh:
+			break L
+		}
+	}
 }
 
 func (c *ClientPublicConn) Close() {
@@ -213,6 +264,9 @@ func (c *ClientPublicConn) Close() {
 		v.confirm = nil
 	}
 	c.subDataLock.Unlock()
+	if c.receiveBuf != nil {
+		close(c.receiveBuf)
+	}
 	c.Conn.Close()
 }
 
@@ -221,12 +275,18 @@ type ClientPrivateConnOptions struct {
 	AuthTimeout time.Duration
 }
 
+type ClientPrivateMessage struct {
+	Data []byte
+	Conn *ClientPrivateConn
+}
+
 type ClientPrivateConn struct {
 	*ClientPublicConn
 	opts                *ClientPrivateConnOptions
 	authData            proto.Message
 	authSuccessChan     chan bool
 	authSuccessChanLock *sync.RWMutex
+	receiveBuf          chan *ClientPrivateMessage
 }
 
 func fillClientPrivateConnOptions(opts *ClientPrivateConnOptions) error {
@@ -253,13 +313,20 @@ func NewClientPrivateConnWithRequest(url string, data proto.Message, opts *Clien
 		return nil, err
 	}
 	res := &ClientPrivateConn{
+		opts:                opts,
 		ClientPublicConn:    c,
 		authData:            data,
 		authSuccessChan:     make(chan bool),
 		authSuccessChanLock: &sync.RWMutex{},
+		receiveBuf:          make(chan *ClientPrivateMessage, opts.ReceiveBufSize),
 	}
 	res.start()
-	return res, res.auth()
+	go func() {
+		if err := res.auth(); err != nil {
+			logger.Panic("failed client auth", res.url, err)
+		}
+	}()
+	return res, nil
 }
 
 func NewClientPrivateConnWithBasic(url, login, pass string, opts *ClientPrivateConnOptions) (*ClientPrivateConn, error) {
@@ -275,9 +342,11 @@ func NewClientPrivateConnWithBasic(url, login, pass string, opts *ClientPrivateC
 		return nil, err
 	}
 	res := &ClientPrivateConn{
+		opts:                opts,
 		ClientPublicConn:    c,
 		authSuccessChan:     make(chan bool),
 		authSuccessChanLock: &sync.RWMutex{},
+		receiveBuf:          make(chan *ClientPrivateMessage, opts.ReceiveBufSize),
 	}
 	res.start()
 	return res, res.auth()
@@ -295,9 +364,11 @@ func NewClientPrivateConnWithToken(url, token string, opts *ClientPrivateConnOpt
 		return nil, err
 	}
 	res := &ClientPrivateConn{
+		opts:                opts,
 		ClientPublicConn:    c,
 		authSuccessChan:     make(chan bool),
 		authSuccessChanLock: &sync.RWMutex{},
+		receiveBuf:          make(chan *ClientPrivateMessage, opts.ReceiveBufSize),
 	}
 	res.start()
 	return res, res.auth()
@@ -355,7 +426,36 @@ func (c *ClientPrivateConn) restart() {
 }
 
 func (c *ClientPrivateConn) listenReceive() {
-	c.Conn.listenReceive()
+	for {
+		_, msg, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsCloseError(err, allCodes...) {
+				logger.Log("normal close")
+			} else if websocket.IsUnexpectedCloseError(err, allCodes...) {
+				logger.Log("unexpected close")
+			} else {
+				logger.Log("ws read message err: ", err)
+			}
+			break
+		}
+		if !c.IsAlive() {
+			break
+		}
+		if len(c.receiveBuf) == cap(c.receiveBuf) {
+			logger.Log("receive buffer overflow")
+			c.sendOverflowMessage()
+			continue
+		}
+		select {
+		case c.receiveBuf <- &ClientPrivateMessage{
+			Conn: c,
+			Data: msg,
+		}:
+			break
+		case <-time.After(c.opts.ReceiveBufTimeout):
+			c.sendOverflowMessage()
+		}
+	}
 	if c.IsAlive() {
 		c.pingCloseCh <- true
 		c.sendCloseCh <- true
@@ -363,8 +463,28 @@ func (c *ClientPrivateConn) listenReceive() {
 	c.restart()
 }
 
+func (c *ClientPrivateConn) listenSend() {
+L:
+	for {
+		select {
+		case data := <-c.sendBuf:
+			if data != nil {
+				c.sendProto(data)
+			}
+			break
+		case <-c.sendCloseCh:
+			break L
+		}
+	}
+}
+
+func (c *ClientPrivateConn) ReceiveBuf() chan *ClientPrivateMessage {
+	return c.receiveBuf
+}
+
 func (c *ClientPrivateConn) Close() {
 	c.authSuccessChanLock.Lock()
+	close(c.receiveBuf)
 	close(c.authSuccessChan)
 	c.authSuccessChan = nil
 	c.authSuccessChanLock.Unlock()

@@ -37,6 +37,7 @@ func NewPrivatePool(opts *conn.ServerPrivateConnOptions, roles []structs.Role,
 		res.pools[r] = sameRolePool{conns: map[int64]orderedConn{}, lock: locker.NewLockSystem()}
 	}
 	opts.Onclose = res.onclose
+	opts.Onauth = res.onauth
 	return res
 }
 
@@ -50,6 +51,21 @@ func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*co
 		logger.Log("add connection failed: ", err)
 		return nil, err
 	}
+	go func(c *conn.ServerPrivateConn) {
+		for msg := range c.ReceiveBuf() {
+			select {
+			case p.queue <- msg:
+				break
+			case <-time.After(p.timeout):
+				c.SendBuf() <- p.opts.OverflowMsg
+				break
+			}
+		}
+	}(c)
+	return c, nil
+}
+
+func (p *PrivatePool) onauth(c *conn.ServerPrivateConn) {
 	acc := c.GetAccount()
 
 	rolePool := p.pools[acc.Role]
@@ -77,18 +93,6 @@ func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*co
 	}
 
 	p.pools[acc.Role].conns[acc.Id] = append(p.pools[acc.Role].conns[acc.Id], c)
-	go func(c *conn.ServerPrivateConn) {
-		for msg := range c.ReceiveBuf() {
-			select {
-			case p.queue <- msg:
-				break
-			case <-time.After(p.timeout):
-				c.SendBuf() <- p.opts.OverflowMsg
-				break
-			}
-		}
-	}(c)
-	return c, nil
 }
 
 func (p *PrivatePool) onclose(acc *structs.Account, connId int64) {

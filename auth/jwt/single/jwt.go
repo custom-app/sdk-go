@@ -12,6 +12,7 @@ type AuthProvider interface {
 		versions []string, disabled ...structs.Role) (*structs.Account, error)
 	AuthWithInfo(ctx context.Context, token string, purpose structs.Purpose, platform structs.Platform,
 		versions []string, disabled ...structs.Role) (*structs.Account, proto.Message, error)
+	CreateTokens(ctx context.Context, role structs.Role, id int64) (string, int64, string, int64, error)
 	Logout(ctx context.Context, role structs.Role, id int64) error
 }
 

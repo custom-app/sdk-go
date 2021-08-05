@@ -2,7 +2,9 @@ package logger
 
 import "log"
 
-var defaultLogger Logger = &StderrLogger{}
+var defaultLogger Logger = &StderrLogger{
+	logLevel: 3,
+}
 
 type Logger interface {
 	Init()

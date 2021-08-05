@@ -28,6 +28,7 @@ type HttpJob struct {
 	W       http.ResponseWriter
 	R       *http.Request
 	Handler http.Handler
+	resCh chan bool
 }
 
 type HttpQueueOptions struct {
@@ -98,11 +99,14 @@ func (q *HttpQueue) AddJob(job *HttpJob) {
 
 func (q *HttpQueue) Handler(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resCh := make(chan bool)
 		q.AddJob(&HttpJob{
 			W:       w,
 			R:       r,
 			Handler: handler,
+			resCh: resCh,
 		})
+		<- resCh
 	})
 }
 
@@ -112,6 +116,7 @@ func (q *HttpQueue) sendOverflow(job *HttpJob) {
 	} else {
 		http2.SendBytes(job.W, q.opts.OverflowCode, q.opts.OverflowMsgProto)
 	}
+	job.resCh <- true
 }
 
 func (q *HttpQueue) GetQueue() chan *HttpJob {

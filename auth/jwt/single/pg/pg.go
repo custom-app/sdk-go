@@ -279,11 +279,23 @@ func (m *AuthorizationMaker) createToken(ctx context.Context, tx *pg.Transaction
 	return res, nil
 }
 
-func (m *AuthorizationMaker) CreateTokens(ctx context.Context, tx *pg.Transaction, role structs.Role,
-	id int64) (string, int64, string, int64, error) {
-	m.lockers[role].Lock(id)
-	defer m.lockers[role].Unlock(id)
-	return m.createTokens(ctx, tx, role, id)
+func (m *AuthorizationMaker) CreateTokens(ctx context.Context, role structs.Role, id int64) (
+	accessToken string, accessExpires int64, refreshToken string, refreshExpires int64, err error) {
+	if err := m.queue.MakeJob(&pg3.Task{
+		Ctx:          ctx,
+		Options:      pgx.TxOptions{},
+		QueueTimeout: time.Second,
+		Timeout:      m.authTimeout,
+		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+			m.lockers[role].Lock(id)
+			defer m.lockers[role].Unlock(id)
+			accessToken, accessExpires, refreshToken, refreshExpires, err = m.createTokens(ctx, tx, role, id)
+			return err
+		},
+	}); err != nil {
+		return "", 0, "", 0, err
+	}
+	return
 }
 
 func (m *AuthorizationMaker) createTokens(ctx context.Context, tx *pg.Transaction, role structs.Role,

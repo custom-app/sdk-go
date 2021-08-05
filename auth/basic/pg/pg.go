@@ -48,13 +48,22 @@ func (m *AuthorizationMaker) Auth(ctx context.Context, login, password string, p
 		Timeout:      m.authTimeout,
 		Worker: func(ctx context.Context, tx *pg.Transaction) error {
 			var err error
-			acc, err = m.findUserForLoginPass(ctx, tx, login, password, disabled...)
+			acc, err = m.AuthWithTx(ctx, tx, login, password, platform, versions, disabled...)
 			if err != nil {
 				return err
 			}
 			return nil
 		},
 	}); err != nil {
+		return nil, err
+	}
+	return acc, nil
+}
+
+func (m *AuthorizationMaker) AuthWithTx(ctx context.Context, tx *pg.Transaction, login, password string,
+	platform structs.Platform, versions []string, disabled ...structs.Role) (*structs.Account, error) {
+	acc, err := m.findUserForLoginPass(ctx, tx, login, password, disabled...)
+	if err != nil {
 		return nil, err
 	}
 	acc.Platform, acc.Versions = platform, versions

@@ -45,9 +45,14 @@ type sendData struct {
 	data   []byte
 }
 
-type Message struct {
+type ReceivedMessage struct {
 	Conn *Conn
 	Data []byte
+}
+
+type SentMessage struct {
+	Data       proto.Message
+	IsResponse bool
 }
 
 type Options struct {
@@ -65,11 +70,11 @@ type Conn struct {
 	contentType string
 	isAlive     int32 // счетчик для определения, живо ли соединение
 
-	sendLock                 *sync.Mutex        // мутекс для последовательной обработки отправки/пинга/закрытия
-	wg                       *sync.WaitGroup    // processing messages count
-	sendBuf                  chan proto.Message // канал сообщений для отправки
-	receiveBuf               chan *Message      // канал полученных сообщений
-	sendCloseCh, pingCloseCh chan bool          // каналы для выхода рутин отправки сообщений и пинг-понга
+	sendLock                 *sync.Mutex           // мутекс для последовательной обработки отправки/пинга/закрытия
+	wg                       *sync.WaitGroup       // processing messages count
+	sendBuf                  chan proto.Message     // канал сообщений для отправки
+	receiveBuf               chan *ReceivedMessage // канал полученных сообщений
+	sendCloseCh, pingCloseCh chan bool             // каналы для выхода рутин отправки сообщений и пинг-понга
 
 	subLock       *sync.RWMutex            // блокировка подписок
 	subscriptions map[structs.SubKind]bool // активированные подписки
@@ -126,7 +131,7 @@ func newConn(conn *websocket.Conn, opts *Options, needStart bool) (*Conn, error)
 		opts:        opts,
 	}
 	if needStart {
-		res.receiveBuf = make(chan *Message, opts.ReceiveBufSize)
+		res.receiveBuf = make(chan *ReceivedMessage, opts.ReceiveBufSize)
 		res.start()
 	}
 
@@ -224,7 +229,7 @@ func (c *Conn) listenReceive() {
 		}
 		c.wg.Add(1)
 		select {
-		case c.receiveBuf <- &Message{
+		case c.receiveBuf <- &ReceivedMessage{
 			Conn: c,
 			Data: msg,
 		}:
@@ -292,7 +297,7 @@ L:
 	}
 }
 
-func (c *Conn) ReceiveBuf() chan *Message {
+func (c *Conn) ReceiveBuf() chan *ReceivedMessage {
 	return c.receiveBuf
 }
 

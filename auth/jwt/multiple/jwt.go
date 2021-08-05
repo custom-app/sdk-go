@@ -13,6 +13,10 @@ type AuthProvider interface {
 	AuthWithInfo(ctx context.Context, token string, purpose structs.Purpose, platform structs.Platform,
 		versions []string, disabled ...structs.Role) (*structs.Account, int64, proto.Message, error)
 	Logout(ctx context.Context, role structs.Role, id int64) error
+	CreateTokens(ctx context.Context, role structs.Role, id int64) (string, int64, string, int64, error)
+	ReCreateTokens(ctx context.Context, role structs.Role, id, number int64) (string, int64, string, int64, error)
+	DropTokens(ctx context.Context, role structs.Role, id, number int64) error
+	DropOldTokens(ctx context.Context, timestamp int64) error
 }
 
 var defaultAuth AuthProvider
@@ -35,6 +39,22 @@ func AuthWithInfo(ctx context.Context, token string, purpose structs.Purpose, pl
 
 func Logout(ctx context.Context, role structs.Role, id int64) error {
 	return defaultAuth.Logout(ctx, role, id)
+}
+
+func CreateTokens(ctx context.Context, role structs.Role, id int64) (string, int64, string, int64, error) {
+	return defaultAuth.CreateTokens(ctx, role, id)
+}
+
+func ReCreateTokens(ctx context.Context, role structs.Role, id, number int64) (string, int64, string, int64, error) {
+	return defaultAuth.ReCreateTokens(ctx, role, id, number)
+}
+
+func DropTokens(ctx context.Context, role structs.Role, id, number int64) error {
+	return defaultAuth.DropTokens(ctx, role, id, number)
+}
+
+func DropOldTokens(ctx context.Context, timestamp int64) error {
+	return defaultAuth.DropOldTokens(ctx, timestamp)
 }
 
 func SetDefaultAuth(f AuthProvider) {
