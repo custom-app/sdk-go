@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -141,7 +142,9 @@ func (c *ClientPublicConn) Sub(kind structs.SubKind, req proto.Message) error {
 }
 
 func (c *ClientPublicConn) sub(kind structs.SubKind, req proto.Message, confirmCh chan bool) error {
-	c.sendBuf <- req
+	c.SendData(&SentMessage{
+		Data: req,
+	})
 	select {
 	case _, _ = <-confirmCh:
 		c.SetSub(kind, true)
@@ -246,8 +249,8 @@ L:
 	for {
 		select {
 		case data := <-c.sendBuf:
-			if data != nil {
-				c.sendProto(data)
+			if data != nil && data.Data != nil {
+				c.sendProto(data.Data)
 			}
 			break
 		case <-c.sendCloseCh:
@@ -257,6 +260,13 @@ L:
 }
 
 func (c *ClientPublicConn) Close() {
+	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
+		c.wg.Wait()
+		c.close()
+	}
+}
+
+func (c *ClientPublicConn) close() {
 	c.needRestart = false
 	c.subDataLock.Lock()
 	for _, v := range c.subData {
@@ -267,7 +277,7 @@ func (c *ClientPublicConn) Close() {
 	if c.receiveBuf != nil {
 		close(c.receiveBuf)
 	}
-	c.Conn.Close()
+	c.Conn.close()
 }
 
 type ClientPrivateConnOptions struct {
@@ -321,11 +331,6 @@ func NewClientPrivateConnWithRequest(url string, data proto.Message, opts *Clien
 		receiveBuf:          make(chan *ClientPrivateMessage, opts.ReceiveBufSize),
 	}
 	res.start()
-	go func() {
-		if err := res.auth(); err != nil {
-			logger.Panic("failed client auth", res.url, err)
-		}
-	}()
 	return res, nil
 }
 
@@ -349,7 +354,7 @@ func NewClientPrivateConnWithBasic(url, login, pass string, opts *ClientPrivateC
 		receiveBuf:          make(chan *ClientPrivateMessage, opts.ReceiveBufSize),
 	}
 	res.start()
-	return res, res.auth()
+	return res, nil
 }
 
 func NewClientPrivateConnWithToken(url, token string, opts *ClientPrivateConnOptions) (*ClientPrivateConn, error) {
@@ -371,7 +376,7 @@ func NewClientPrivateConnWithToken(url, token string, opts *ClientPrivateConnOpt
 		receiveBuf:          make(chan *ClientPrivateMessage, opts.ReceiveBufSize),
 	}
 	res.start()
-	return res, res.auth()
+	return res, nil
 }
 
 func (c *ClientPrivateConn) start() {
@@ -380,9 +385,11 @@ func (c *ClientPrivateConn) start() {
 	go c.listenSend()
 }
 
-func (c *ClientPrivateConn) auth() error {
+func (c *ClientPrivateConn) Auth() error {
 	if c.authData != nil {
-		c.sendBuf <- c.authData
+		c.SendData(&SentMessage{
+			Data: c.authData,
+		})
 	}
 	select {
 	case _, _ = <-c.authSuccessChan:
@@ -413,7 +420,7 @@ func (c *ClientPrivateConn) restart() {
 		}
 		c.conn = conn
 		c.start()
-		if err := c.auth(); err != nil {
+		if err := c.Auth(); err != nil {
 			logger.Info("restart auth failed", err)
 			if err := c.conn.Close(); err != nil {
 				logger.Info("restart close after auth failed err", err)
@@ -468,8 +475,8 @@ L:
 	for {
 		select {
 		case data := <-c.sendBuf:
-			if data != nil {
-				c.sendProto(data)
+			if data != nil && data.Data != nil {
+				c.sendProto(data.Data)
 			}
 			break
 		case <-c.sendCloseCh:
@@ -483,6 +490,13 @@ func (c *ClientPrivateConn) ReceiveBuf() chan *ClientPrivateMessage {
 }
 
 func (c *ClientPrivateConn) Close() {
+	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
+		c.wg.Wait()
+		c.close()
+	}
+}
+
+func (c *ClientPrivateConn) close() {
 	c.authSuccessChanLock.Lock()
 	close(c.receiveBuf)
 	close(c.authSuccessChan)

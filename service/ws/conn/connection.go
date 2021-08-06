@@ -70,9 +70,11 @@ type Conn struct {
 	contentType string
 	isAlive     int32 // счетчик для определения, живо ли соединение
 
-	sendLock                 *sync.Mutex           // мутекс для последовательной обработки отправки/пинга/закрытия
-	wg                       *sync.WaitGroup       // processing messages count
-	sendBuf                  chan proto.Message     // канал сообщений для отправки
+	closeLock                *sync.Mutex
+	sendLock                 *sync.Mutex     // мутекс для последовательной обработки отправки/пинга/закрытия
+	wg                       *sync.WaitGroup // processing messages count
+	sendDataLock             *sync.Mutex
+	sendBuf                  chan *SentMessage     // канал сообщений для отправки
 	receiveBuf               chan *ReceivedMessage // канал полученных сообщений
 	sendCloseCh, pingCloseCh chan bool             // каналы для выхода рутин отправки сообщений и пинг-понга
 
@@ -121,14 +123,17 @@ func newConn(conn *websocket.Conn, opts *Options, needStart bool) (*Conn, error)
 		return nil, err
 	}
 	res := &Conn{
-		contentType: opts.ContentType,
-		conn:        conn,
-		sendLock:    &sync.Mutex{},
-		wg:          &sync.WaitGroup{},
-		sendBuf:     make(chan proto.Message, opts.SendBufSize),
-		sendCloseCh: make(chan bool),
-		pingCloseCh: make(chan bool),
-		opts:        opts,
+		contentType:   opts.ContentType,
+		conn:          conn,
+		sendLock:      &sync.Mutex{},
+		wg:            &sync.WaitGroup{},
+		subLock:       &sync.RWMutex{},
+		subscriptions: map[structs.SubKind]bool{},
+		sendDataLock:  &sync.Mutex{},
+		sendBuf:       make(chan *SentMessage, opts.SendBufSize),
+		sendCloseCh:   make(chan bool),
+		pingCloseCh:   make(chan bool),
+		opts:          opts,
 	}
 	if needStart {
 		res.receiveBuf = make(chan *ReceivedMessage, opts.ReceiveBufSize)
@@ -243,7 +248,9 @@ func (c *Conn) listenReceive() {
 
 func (c *Conn) listenReceiveWithStop() {
 	c.listenReceive()
-	c.Close()
+	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
+		c.close()
+	}
 }
 
 func (c *Conn) listenSend() {
@@ -252,9 +259,13 @@ L:
 		select {
 		case data := <-c.sendBuf:
 			if data != nil {
-				c.sendProto(data)
+				if data.Data != nil {
+					c.sendProto(data.Data)
+				}
+				if data.IsResponse {
+					c.wg.Done()
+				}
 			}
-			c.wg.Done()
 			break
 		case <-c.sendCloseCh:
 			break L
@@ -301,8 +312,12 @@ func (c *Conn) ReceiveBuf() chan *ReceivedMessage {
 	return c.receiveBuf
 }
 
-func (c *Conn) SendBuf() chan proto.Message {
-	return c.sendBuf
+func (c *Conn) SendData(msg *SentMessage) {
+	c.sendDataLock.Lock()
+	if c.IsAlive() {
+		c.sendBuf <- msg
+	}
+	c.sendDataLock.Unlock()
 }
 
 func (c *Conn) IsAlive() bool {
@@ -329,17 +344,24 @@ func (c *Conn) ContentType() string {
 func (c *Conn) Close() {
 	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
 		c.wg.Wait()
-		c.pingCloseCh <- true
-		close(c.pingCloseCh)
-		c.sendCloseCh <- true
-		close(c.sendCloseCh)
-		if err := c.conn.Close(); err != nil {
-			logger.Log("ws close conn err: ", err)
-		}
-		if c.receiveBuf != nil {
-			close(c.receiveBuf)
-		}
-		close(c.sendBuf)
-		c.conn = nil
+		c.close()
 	}
+}
+
+func (c *Conn) close() {
+	c.sendDataLock.Lock()
+	atomic.StoreInt32(&c.isAlive, 1)
+	c.pingCloseCh <- true
+	close(c.pingCloseCh)
+	c.sendCloseCh <- true
+	close(c.sendCloseCh)
+	if err := c.conn.Close(); err != nil {
+		logger.Log("ws close conn err: ", err)
+	}
+	if c.receiveBuf != nil {
+		close(c.receiveBuf)
+	}
+	close(c.sendBuf)
+	c.conn = nil
+	c.sendDataLock.Unlock()
 }

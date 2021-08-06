@@ -36,7 +36,6 @@ func NewPrivatePool(opts *conn.ServerPrivateConnOptions, roles []structs.Role,
 	for _, r := range roles {
 		res.pools[r] = sameRolePool{conns: map[int64]orderedConn{}, lock: locker.NewLockSystem()}
 	}
-	opts.Onclose = res.onclose
 	opts.Onauth = res.onauth
 	return res
 }
@@ -46,7 +45,7 @@ func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*co
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
-	}, w, r, p.opts)
+	}, w, r, p.opts, p.onclose)
 	if err != nil {
 		logger.Log("add connection failed: ", err)
 		return nil, err
@@ -57,7 +56,9 @@ func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*co
 			case p.queue <- msg:
 				break
 			case <-time.After(p.timeout):
-				c.SendBuf() <- p.opts.OverflowMsg
+				c.SendData(&conn.SentMessage{
+					Data: p.opts.OverflowMsg,
+				})
 				break
 			}
 		}
@@ -120,10 +121,10 @@ func (p *PrivatePool) SendOnSubAll(role structs.Role, kind structs.SubKind, id, 
 			acc := c.GetAccount()
 			subValue := c.GetSub(kind)
 			if (acc.Id != id || c.ConnId() != connId || (acc.Id == id && force)) && subValue {
-				go func(c *conn.ServerPrivateConn) {
-					logger.Log("sending sub with all to", *acc, c.ConnId(), data)
-					c.SendBuf() <- data
-				}(c)
+				logger.Log("sending sub with all to", *acc, c.ConnId(), data)
+				c.SendData(&conn.SentMessage{
+					Data: data,
+				})
 			}
 		}
 		p.pools[role].lock.Unlock(setId)
@@ -138,7 +139,9 @@ func (p *PrivatePool) SendOnSubReceivers(role structs.Role, kind structs.SubKind
 			subValue := c.GetSub(kind)
 			if (acc.Id != id || c.ConnId() != connId || (acc.Id == id && force)) && subValue {
 				logger.Log("sending sub with receivers to", *acc, c.ConnId(), data)
-				c.SendBuf() <- data
+				c.SendData(&conn.SentMessage{
+					Data: data,
+				})
 			}
 		}
 		p.pools[role].lock.Unlock(recId)

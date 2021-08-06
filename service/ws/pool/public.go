@@ -29,7 +29,6 @@ func NewPublicPool(opts *conn.ServerPublicConnOptions,
 		queue:    make(chan *conn.PublicMessage, queueSize),
 		timeout:  timeout,
 	}
-	opts.Onclose = res.onclose
 	return res
 }
 
@@ -45,7 +44,7 @@ func (p *PublicPool) AddConnection(w http.ResponseWriter, r *http.Request) (*con
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
-	}, w, r, p.opts)
+	}, w, r, p.opts, nil)
 	if err != nil {
 		logger.Log("add connection failed: ", err)
 		return nil, err
@@ -57,7 +56,9 @@ func (p *PublicPool) AddConnection(w http.ResponseWriter, r *http.Request) (*con
 			case p.queue <- msg:
 				break
 			case <-time.After(p.timeout):
-				c.SendBuf() <- p.opts.OverflowMsg
+				c.SendData(&conn.SentMessage{
+					Data: p.opts.OverflowMsg,
+				})
 				break
 			}
 			p.queue <- msg
@@ -77,7 +78,9 @@ func (p *PublicPool) SendOnSubAll(kind structs.SubKind, data proto.Message) {
 	for _, c := range p.conns {
 		if c.GetSub(kind) {
 			go func(c *conn.ServerPublicConn) {
-				c.SendBuf() <- data
+				c.SendData(&conn.SentMessage{
+					Data: data,
+				})
 			}(c)
 		}
 	}

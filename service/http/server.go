@@ -17,9 +17,6 @@ type Server struct {
 
 func NewServer(service Service, address string) (*Server, error) {
 	router := mux.NewRouter()
-	if err := service.FillHandlers(router.PathPrefix(consts.ApiPrefix).Subrouter()); err != nil {
-		return nil, err
-	}
 	res := &Server{
 		router:  router,
 		service: service,
@@ -67,6 +64,9 @@ func (s *Server) handleOtherHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) Start() error {
 	if err := s.service.Start(); err != nil {
+		return err
+	}
+	if err := s.service.FillHandlers(s.router.PathPrefix(consts.ApiPrefix).Subrouter()); err != nil {
 		return err
 	}
 	if err := s.s.ListenAndServe(); err != http.ErrServerClosed {

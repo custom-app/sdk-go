@@ -31,7 +31,6 @@ type AuthOptions struct {
 
 type ServerPublicConnOptions struct {
 	*Options
-	Onclose func(int64)
 }
 
 type PublicMessage struct {
@@ -45,6 +44,7 @@ type ServerPublicConn struct {
 	opts       *ServerPublicConnOptions
 	connId     int64
 	receiveBuf chan *PublicMessage
+	Onclose    func(int64)
 }
 
 func fillServerPublicOptions(opts *ServerPublicConnOptions) error {
@@ -54,7 +54,7 @@ func fillServerPublicOptions(opts *ServerPublicConnOptions) error {
 	return fillOpts(opts.Options)
 }
 
-func newServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions, needStart bool) (*ServerPublicConn, error) {
+func newServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions, onclose func(int64), needStart bool) (*ServerPublicConn, error) {
 	if opts == nil {
 		return nil, OptsRequiredErr
 	}
@@ -66,8 +66,9 @@ func newServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions, ne
 		return nil, err
 	}
 	res := &ServerPublicConn{
-		Conn: c,
-		opts: opts,
+		Conn:    c,
+		opts:    opts,
+		Onclose: onclose,
 	}
 	if needStart {
 		res.receiveBuf = make(chan *PublicMessage, opts.ReceiveBufSize)
@@ -76,12 +77,12 @@ func newServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions, ne
 	return res, nil
 }
 
-func NewServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions) (*ServerPublicConn, error) {
-	return newServerPublicConn(conn, opts, true)
+func NewServerPublicConn(conn *websocket.Conn, opts *ServerPublicConnOptions, onclose func(int64)) (*ServerPublicConn, error) {
+	return newServerPublicConn(conn, opts, onclose, true)
 }
 
 func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
-	opts *ServerPublicConnOptions) (*ServerPublicConn, error) {
+	opts *ServerPublicConnOptions, onclose func(int64)) (*ServerPublicConn, error) {
 	defer r.Body.Close()
 	if opts == nil {
 		return nil, OptsRequiredErr
@@ -96,7 +97,7 @@ func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter
 	if err := r.Body.Close(); err != nil {
 		return nil, err
 	}
-	res, err := NewServerPublicConn(conn, opts)
+	res, err := NewServerPublicConn(conn, opts, onclose)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +148,9 @@ func (c *ServerPublicConn) listenReceive() {
 
 func (c *ServerPublicConn) listenReceiveWithStop() {
 	c.listenReceive()
-	c.Close()
+	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
+		c.close()
+	}
 }
 
 func (c *ServerPublicConn) ReceiveBuf() chan *PublicMessage {
@@ -163,19 +166,25 @@ func (c *ServerPublicConn) ConnId() int64 {
 }
 
 func (c *ServerPublicConn) Close() {
-	c.Conn.Close()
+	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
+		c.wg.Wait()
+		c.close()
+	}
+}
+
+func (c *ServerPublicConn) close() {
+	c.Conn.close()
 	if c.receiveBuf != nil {
 		close(c.receiveBuf)
 	}
-	if c.opts.Onclose != nil {
-		c.opts.Onclose(c.connId)
+	if c.Onclose != nil {
+		c.Onclose(c.connId)
 	}
 }
 
 type ServerPrivateConnOptions struct {
 	*ServerPublicConnOptions
 	AuthOptions *AuthOptions
-	Onclose     func(*structs.Account, int64)
 	Onauth      func(c *ServerPrivateConn)
 }
 
@@ -198,6 +207,7 @@ type ServerPrivateConn struct {
 	authChLock *sync.Mutex
 	authCh     chan *AuthRes
 	receiveBuf chan *PrivateMessage
+	Onclose    func(*structs.Account, int64)
 }
 
 func fillServerPrivateOptions(opts *ServerPrivateConnOptions) error {
@@ -207,14 +217,14 @@ func fillServerPrivateOptions(opts *ServerPrivateConnOptions) error {
 	return fillServerPublicOptions(opts.ServerPublicConnOptions)
 }
 
-func NewServerPrivateConn(conn *websocket.Conn, opts *ServerPrivateConnOptions) (*ServerPrivateConn, error) {
+func NewServerPrivateConn(conn *websocket.Conn, opts *ServerPrivateConnOptions, onclose func(*structs.Account, int64)) (*ServerPrivateConn, error) {
 	if opts == nil {
 		return nil, OptsRequiredErr
 	}
 	if err := fillServerPrivateOptions(opts); err != nil {
 		return nil, err
 	}
-	c, err := newServerPublicConn(conn, opts.ServerPublicConnOptions, false)
+	c, err := newServerPublicConn(conn, opts.ServerPublicConnOptions, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -225,13 +235,15 @@ func NewServerPrivateConn(conn *websocket.Conn, opts *ServerPrivateConnOptions) 
 		authCh:           make(chan *AuthRes),
 		authChLock:       &sync.Mutex{},
 		receiveBuf:       make(chan *PrivateMessage, opts.ReceiveBufSize),
+		Onclose:          onclose,
 	}
 	go res.start()
 	return res, nil
 }
 
 func privateServerConnViaToken(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
-	opts *ServerPrivateConnOptions, platform structs.Platform, versions []string, a string) (*ServerPrivateConn, error) {
+	opts *ServerPrivateConnOptions, platform structs.Platform, versions []string, a string,
+	onclose func(*structs.Account, int64)) (*ServerPrivateConn, error) {
 	code, e := opts.AuthOptions.VersionChecker(platform, versions)
 	if e != nil {
 		http2.SendResponseWithContentType(w, r, code, e)
@@ -261,7 +273,7 @@ func privateServerConnViaToken(upgrader *websocket.Upgrader, w http.ResponseWrit
 	if err := r.Body.Close(); err != nil {
 		return nil, err
 	}
-	res, err := NewServerPrivateConn(conn, opts)
+	res, err := NewServerPrivateConn(conn, opts, onclose)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +284,8 @@ func privateServerConnViaToken(upgrader *websocket.Upgrader, w http.ResponseWrit
 }
 
 func privateServerConnViaBasic(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
-	opts *ServerPrivateConnOptions, platform structs.Platform, versions []string, login, password string) (*ServerPrivateConn, error) {
+	opts *ServerPrivateConnOptions, platform structs.Platform, versions []string, login, password string,
+	onclose func(*structs.Account, int64)) (*ServerPrivateConn, error) {
 	code, e := opts.AuthOptions.VersionChecker(platform, versions)
 	if e != nil {
 		http2.SendResponseWithContentType(w, r, code, e)
@@ -291,7 +304,7 @@ func privateServerConnViaBasic(upgrader *websocket.Upgrader, w http.ResponseWrit
 	if err := r.Body.Close(); err != nil {
 		return nil, err
 	}
-	res, err := NewServerPrivateConn(conn, opts)
+	res, err := NewServerPrivateConn(conn, opts, onclose)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +315,7 @@ func privateServerConnViaBasic(upgrader *websocket.Upgrader, w http.ResponseWrit
 }
 
 func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
-	opts *ServerPrivateConnOptions) (*ServerPrivateConn, error) {
+	opts *ServerPrivateConnOptions, onclose func(*structs.Account, int64)) (*ServerPrivateConn, error) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return nil, err
@@ -310,7 +323,7 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 	if err := r.Body.Close(); err != nil {
 		return nil, err
 	}
-	res, err := NewServerPrivateConn(conn, opts)
+	res, err := NewServerPrivateConn(conn, opts, onclose)
 	if err != nil {
 		return nil, err
 	}
@@ -318,19 +331,26 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 		authRes, err := res.auth()
 		if err != nil {
 			_, e := opts.AuthOptions.ErrorMapper(err)
-			res.sendProto(e)
-			logger.Log("auth wait failed. closing connection")
+			res.SendData(&SentMessage{
+				Data:       e,
+				IsResponse: true,
+			})
+			logger.Log("auth wait failed. closing connection", e)
 			res.Close()
+			return
 		}
 		res.SetAccount(authRes.Account)
-		res.sendProto(authRes.Resp)
+		res.SendData(&SentMessage{
+			Data:       authRes.Resp,
+			IsResponse: true,
+		})
 		res.opts.Onauth(res)
 	}()
 	return res, nil
 }
 
 func UpgradePrivateServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
-	opts *ServerPrivateConnOptions) (*ServerPrivateConn, error) {
+	opts *ServerPrivateConnOptions, onclose func(*structs.Account, int64)) (*ServerPrivateConn, error) {
 	defer r.Body.Close()
 	if opts == nil {
 		return nil, OptsRequiredErr
@@ -347,11 +367,11 @@ func UpgradePrivateServerConn(upgrader *websocket.Upgrader, w http.ResponseWrite
 		err error
 	)
 	if isToken && opts.AuthOptions.TokenAllowed {
-		res, err = privateServerConnViaToken(upgrader, w, r, opts, platform, versions, a)
+		res, err = privateServerConnViaToken(upgrader, w, r, opts, platform, versions, a, onclose)
 	} else if isBasic && opts.AuthOptions.BasicAllowed {
-		res, err = privateServerConnViaBasic(upgrader, w, r, opts, platform, versions, login, password)
+		res, err = privateServerConnViaBasic(upgrader, w, r, opts, platform, versions, login, password, onclose)
 	} else if opts.AuthOptions.RequestAllowed {
-		res, err = privateServerConnViaRequest(upgrader, w, r, opts)
+		res, err = privateServerConnViaRequest(upgrader, w, r, opts, onclose)
 	} else {
 		code, e := opts.AuthOptions.ErrorMapper(auth.FailedAuthErr)
 		http2.SendResponseWithContentType(w, r, code, e)
@@ -428,7 +448,9 @@ func (c *ServerPrivateConn) listenReceive() {
 
 func (c *ServerPrivateConn) listenReceiveWithStop() {
 	c.listenReceive()
-	c.Close()
+	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
+		c.close()
+	}
 }
 
 func (c *ServerPrivateConn) ReceiveBuf() chan *PrivateMessage {
@@ -454,10 +476,15 @@ func (c *ServerPrivateConn) SetAccount(acc *structs.Account) {
 
 func (c *ServerPrivateConn) Close() {
 	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
-		c.ServerPublicConn.Close()
-		close(c.receiveBuf)
-		if c.opts.Onclose != nil && c.account != nil {
-			c.opts.Onclose(c.account, c.connId)
-		}
+		c.wg.Wait()
+		c.close()
+	}
+}
+
+func (c *ServerPrivateConn) close() {
+	c.ServerPublicConn.close()
+	close(c.receiveBuf)
+	if c.Onclose != nil && c.account != nil {
+		c.Onclose(c.account, c.connId)
 	}
 }
