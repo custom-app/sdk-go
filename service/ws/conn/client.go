@@ -277,6 +277,7 @@ func (c *ClientPublicConn) close() {
 	if c.receiveBuf != nil {
 		close(c.receiveBuf)
 	}
+	c.needRestart = false
 	c.Conn.close()
 }
 
@@ -502,5 +503,6 @@ func (c *ClientPrivateConn) close() {
 	close(c.authSuccessChan)
 	c.authSuccessChan = nil
 	c.authSuccessChanLock.Unlock()
+	c.needRestart = false
 	c.ClientPublicConn.Close()
 }
