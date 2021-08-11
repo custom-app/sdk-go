@@ -414,7 +414,9 @@ func (m *AuthorizationMaker) DropOldTokens(ctx context.Context, timestamp int64)
 		Timeout:      m.authTimeout,
 		Worker: func(ctx context.Context, tx *pg.Transaction) error {
 			for _, v := range m.tokenTables {
-				dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where expires_at<=$1", v), timestamp)
+				dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where number in " +
+					"(select number from %s where purpose=$1 and expires_at<=$2)", v, v),
+					structs.PurposeRefresh, timestamp)
 				if err := dropReq.Exec(ctx); err != nil {
 					return err
 				}
