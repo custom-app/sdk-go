@@ -333,7 +333,7 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 			_, e := opts.AuthOptions.ErrorMapper(err)
 			res.SendData(&SentMessage{
 				Data:       e,
-				IsResponse: true,
+				IsResponse: err != AuthTimeoutErr,
 			})
 			logger.Log("auth wait failed. closing connection", e)
 			res.Close()
