@@ -222,11 +222,6 @@ func (c *ClientPublicConn) listenReceive() {
 		if !c.IsAlive() {
 			break
 		}
-		if len(c.receiveBuf) == cap(c.receiveBuf) {
-			logger.Log("receive buffer overflow")
-			c.sendOverflowMessage()
-			continue
-		}
 		select {
 		case c.receiveBuf <- &ClientPublicMessage{
 			Conn: c,
@@ -448,11 +443,6 @@ func (c *ClientPrivateConn) listenReceive() {
 		}
 		if !c.IsAlive() {
 			break
-		}
-		if len(c.receiveBuf) == cap(c.receiveBuf) {
-			logger.Log("receive buffer overflow")
-			c.sendOverflowMessage()
-			continue
 		}
 		select {
 		case c.receiveBuf <- &ClientPrivateMessage{

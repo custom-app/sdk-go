@@ -127,11 +127,6 @@ func (c *ServerPublicConn) listenReceive() {
 		if !c.IsAlive() {
 			break
 		}
-		if len(c.receiveBuf) == cap(c.receiveBuf) {
-			logger.Log("receive buffer overflow")
-			c.sendOverflowMessage()
-			continue
-		}
 		c.wg.Add(1)
 		select {
 		case c.receiveBuf <- &PublicMessage{
@@ -426,11 +421,6 @@ func (c *ServerPrivateConn) listenReceive() {
 		}
 		if !c.IsAlive() {
 			break
-		}
-		if len(c.receiveBuf) == cap(c.receiveBuf) {
-			logger.Log("receive buffer overflow")
-			c.sendOverflowMessage()
-			continue
 		}
 		c.wg.Add(1)
 		select {

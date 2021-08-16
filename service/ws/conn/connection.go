@@ -227,11 +227,6 @@ func (c *Conn) listenReceive() {
 		if !c.IsAlive() {
 			break
 		}
-		if len(c.receiveBuf) == cap(c.receiveBuf) {
-			logger.Log("receive buffer overflow")
-			c.sendOverflowMessage()
-			continue
-		}
 		c.wg.Add(1)
 		select {
 		case c.receiveBuf <- &ReceivedMessage{
