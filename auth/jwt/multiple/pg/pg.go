@@ -318,7 +318,10 @@ func (m *AuthorizationMaker) DropTokens(ctx context.Context, role structs.Role, 
 		Worker: func(ctx context.Context, tx *pg.Transaction) error {
 			m.lockers[role].Lock(id)
 			defer m.lockers[role].Unlock(id)
-			return m.dropTokens(ctx, tx, role, id, number)
+			if err := m.dropTokens(ctx, tx, role, id, number); err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
 		},
 	})
 }
@@ -355,7 +358,10 @@ func (m *AuthorizationMaker) ReCreateTokens(ctx context.Context, role structs.Ro
 				return e
 			}
 			accessToken, accessExpires, refreshToken, refreshExpires, err = m.createTokens(ctx, tx, role, id, number)
-			return err
+			if err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
 		},
 	}); err != nil {
 		return "", 0, "", 0, err
@@ -372,7 +378,10 @@ func (m *AuthorizationMaker) CreateTokens(ctx context.Context, role structs.Role
 		Timeout:      m.authTimeout,
 		Worker: func(ctx context.Context, tx *pg.Transaction) error {
 			accessToken, accessExpires, refreshToken, refreshExpires, err = m.CreateTokensWithTx(ctx, tx, role, id)
-			return err
+			if err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
 		},
 	}); err != nil {
 		return "", 0, "", 0, err
@@ -388,7 +397,11 @@ func (m *AuthorizationMaker) CreateTokensWithTx(ctx context.Context, tx *pg.Tran
 	if e != nil {
 		return "", 0, "", 0, e
 	}
-	return m.createTokens(ctx, tx, role, id, number)
+	accessToken, accessExpires, refreshToken, refreshExpires, err = m.createTokens(ctx, tx, role, id, number)
+	if err != nil {
+		return "", 0, "", 0, err
+	}
+	return
 }
 
 func (m *AuthorizationMaker) createTokens(ctx context.Context, tx *pg.Transaction, role structs.Role,
@@ -414,7 +427,7 @@ func (m *AuthorizationMaker) DropOldTokens(ctx context.Context, timestamp int64)
 		Timeout:      m.authTimeout,
 		Worker: func(ctx context.Context, tx *pg.Transaction) error {
 			for _, v := range m.tokenTables {
-				dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where number in " +
+				dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where number in "+
 					"(select number from %s where purpose=$1 and expires_at<=$2)", v, v),
 					structs.PurposeRefresh, timestamp)
 				if err := dropReq.Exec(ctx); err != nil {

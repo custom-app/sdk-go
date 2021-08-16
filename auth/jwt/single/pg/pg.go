@@ -290,9 +290,23 @@ func (m *AuthorizationMaker) CreateTokens(ctx context.Context, role structs.Role
 			m.lockers[role].Lock(id)
 			defer m.lockers[role].Unlock(id)
 			accessToken, accessExpires, refreshToken, refreshExpires, err = m.createTokens(ctx, tx, role, id)
-			return err
+			if err != nil {
+				return err
+			}
+			return tx.Commit(ctx)
 		},
 	}); err != nil {
+		return "", 0, "", 0, err
+	}
+	return
+}
+
+func (m *AuthorizationMaker) CreateTokensWithTx(ctx context.Context, tx *pg.Transaction, role structs.Role,
+	id int64) (accessToken string, accessExpires int64, refreshToken string, refreshExpires int64, err error) {
+	m.lockers[role].Lock(id)
+	defer m.lockers[role].Unlock(id)
+	accessToken, accessExpires, refreshToken, refreshExpires, err = m.createTokens(ctx, tx, role, id)
+	if err != nil {
 		return "", 0, "", 0, err
 	}
 	return
@@ -320,4 +334,24 @@ func (m *AuthorizationMaker) dropToken(ctx context.Context, tx *pg.Transaction,
 		return err
 	}
 	return nil
+}
+
+func (m *AuthorizationMaker) DropOldTokens(ctx context.Context, timestamp int64) error {
+	return m.queue.MakeJob(&pg3.Task{
+		Ctx:          ctx,
+		Options:      pgx.TxOptions{},
+		QueueTimeout: time.Second,
+		Timeout:      m.authTimeout,
+		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+			for _, v := range m.tokenTables {
+				dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where number in "+
+					"(select number from %s where purpose=$1 and expires_at<=$2)", v, v),
+					structs.PurposeRefresh, timestamp)
+				if err := dropReq.Exec(ctx); err != nil {
+					return err
+				}
+			}
+			return tx.Commit(ctx)
+		},
+	})
 }
