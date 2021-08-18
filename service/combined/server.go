@@ -75,6 +75,9 @@ func (s *Server) Start() error {
 	if err := s.service.Start(); err != nil {
 		return err
 	}
+	if err := s.service.FillHandlers(s.router.PathPrefix(consts.ApiPrefix).Subrouter()); err != nil {
+		return err
+	}
 	if err := s.s.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}

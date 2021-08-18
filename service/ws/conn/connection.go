@@ -307,6 +307,18 @@ func (c *Conn) ReceiveBuf() chan *ReceivedMessage {
 	return c.receiveBuf
 }
 
+func (c *Conn) SendRequest(msg proto.Message) {
+	c.SendData(&SentMessage{
+		Data: msg,
+	})
+}
+
+func (c *Conn) SendResponse(msg proto.Message) {
+	c.SendData(&SentMessage{
+		Data: msg,
+	})
+}
+
 func (c *Conn) SendData(msg *SentMessage) {
 	c.sendDataLock.Lock()
 	if c.IsAlive() {
