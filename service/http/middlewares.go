@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"errors"
+	"github.com/loyal-inform/sdk-go/auth"
 	"github.com/loyal-inform/sdk-go/auth/basic"
 	"github.com/loyal-inform/sdk-go/auth/jwt/multiple"
 	"github.com/loyal-inform/sdk-go/auth/jwt/single"
@@ -15,7 +16,6 @@ import (
 )
 
 var (
-	PermissionDenied   = errors.New("permission denied")
 	MissingCredentials = errors.New("missing credentials")
 )
 
@@ -90,7 +90,7 @@ func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...str
 				err = MissingCredentials
 			}
 			if err != nil {
-				code, e := errorMapper(PermissionDenied)
+				code, e := errorMapper(err)
 				SendResponseWithContentType(w, r, code, e)
 				return
 			}
@@ -105,7 +105,7 @@ func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...str
 				}
 			}
 			if ctx == nil {
-				code, e := errorMapper(PermissionDenied)
+				code, e := errorMapper(auth.PermissionDeniedErr)
 				SendResponseWithContentType(w, r, code, e)
 				return
 			}
