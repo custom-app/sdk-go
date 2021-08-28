@@ -17,9 +17,6 @@ type Server struct {
 
 func NewServer(service Service, address string) (*Server, error) {
 	router := mux.NewRouter()
-	if err := service.FillHandlers(router.PathPrefix(consts.ApiPrefix).Subrouter()); err != nil {
-		return nil, err
-	}
 	res := &Server{
 		router:  router,
 		service: service,
