@@ -411,11 +411,11 @@ func (c *ServerPrivateConn) listenReceive() {
 		_, msg, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, allCodes...) {
-				logger.Log("normal close")
+				logger.Log("server private normal close")
 			} else if websocket.IsUnexpectedCloseError(err, allCodes...) {
-				logger.Log("unexpected close")
+				logger.Log("server private unexpected close")
 			} else {
-				logger.Log("ws read message err: ", err)
+				logger.Log("server private ws read message err: ", err)
 			}
 			break
 		}

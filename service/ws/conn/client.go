@@ -433,11 +433,11 @@ func (c *ClientPrivateConn) listenReceive() {
 		_, msg, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, allCodes...) {
-				logger.Log("normal close")
+				logger.Log("client private conn normal close")
 			} else if websocket.IsUnexpectedCloseError(err, allCodes...) {
-				logger.Log("unexpected close")
+				logger.Log("client private conn unexpected close")
 			} else {
-				logger.Log("ws read message err: ", err)
+				logger.Log("client private conn ws read message err: ", err)
 			}
 			break
 		}

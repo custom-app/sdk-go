@@ -100,8 +100,10 @@ func (p *PublicPool) GetQueue() chan *conn.PublicMessage {
 }
 
 func (p *PublicPool) Close() {
+	p.connLock.Lock()
 	for _, c := range p.conns {
-		c.Close()
+		go c.Close()
 	}
+	p.connLock.Unlock()
 	close(p.queue)
 }

@@ -196,10 +196,12 @@ func (p *PrivatePool) GetQueue() chan *conn.PrivateMessage {
 
 func (p *PrivatePool) Close() {
 	for _, v := range p.pools {
-		for _, list := range v.conns {
+		for id, list := range v.conns {
+			v.lock.Lock(id)
 			for _, c := range list {
-				c.Close()
+				go c.Close()
 			}
+			v.lock.Unlock(id)
 		}
 	}
 	close(p.queue)
