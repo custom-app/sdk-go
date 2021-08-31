@@ -13,6 +13,7 @@ type Server struct {
 	s       *http.Server
 	service Service
 	router  *mux.Router
+	address string
 }
 
 func NewServer(service Service, address string) (*Server, error) {
@@ -20,11 +21,11 @@ func NewServer(service Service, address string) (*Server, error) {
 	res := &Server{
 		router:  router,
 		service: service,
+		address: address,
 	}
 	health := router.PathPrefix("/health").Subrouter()
 	health.HandleFunc("/self", res.handleSelfHealth)
 	health.HandleFunc("/other", res.handleOtherHealth)
-	res.s = &http.Server{Addr: address, Handler: router}
 	return res, nil
 }
 
@@ -63,6 +64,7 @@ func (s *Server) handleOtherHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) Start() error {
+	s.s = &http.Server{Addr: s.address, Handler: s.router}
 	if err := s.service.Start(); err != nil {
 		return err
 	}

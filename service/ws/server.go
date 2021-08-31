@@ -47,11 +47,13 @@ type Server struct {
 	s       *http.Server
 	handler *mux.Router
 	service Service
+	address string
 }
 
 func NewServer(service Service, address string) (*Server, error) {
 	res := &Server{
 		service: service,
+		address: address,
 	}
 	res.handler = mux.NewRouter()
 	res.handler.HandleFunc("/connect", res.handleConnect)
@@ -59,7 +61,6 @@ func NewServer(service Service, address string) (*Server, error) {
 	health := res.handler.PathPrefix("/health").Subrouter()
 	health.HandleFunc("/self", res.handleSelfHealth)
 	health.HandleFunc("/other", res.handleOtherHealth)
-	res.s = &http.Server{Addr: address, Handler: res.handler}
 	return res, nil
 }
 
@@ -68,6 +69,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Start() error {
+	s.s = &http.Server{Addr: s.address, Handler: s.handler}
 	if err := s.service.Start(); err != nil {
 		return err
 	}
