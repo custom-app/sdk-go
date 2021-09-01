@@ -364,6 +364,8 @@ func (c *Conn) close() {
 	close(c.sendCloseCh)
 	if err := c.conn.Close(); err != nil {
 		logger.Log("ws close conn err: ", err)
+	} else {
+		logger.Log("close success")
 	}
 	if c.receiveBuf != nil {
 		close(c.receiveBuf)

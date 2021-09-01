@@ -330,8 +330,10 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 				Data:       e,
 				IsResponse: err != AuthTimeoutErr,
 			})
-			logger.Log("auth wait failed. closing connection", r.UserAgent(), e)
-			res.Close()
+			if res.IsAlive() {
+				logger.Log("auth wait failed. closing connection", r.UserAgent(), e)
+				res.Close()
+			}
 			return
 		}
 		res.SetAccount(authRes.Account)
