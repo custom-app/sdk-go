@@ -43,7 +43,7 @@ func VersionMiddleware(header string, checker VersionChecker) func(http.Handler)
 				return
 			}
 			ctx := context.WithValue(r.Context(), consts.PlatformCtxKey, platform)
-			ctx = context.WithValue(r.Context(), consts.VersionsCtxKey, versions)
+			ctx = context.WithValue(ctx, consts.VersionsCtxKey, versions)
 			handler.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
