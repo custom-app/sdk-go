@@ -44,7 +44,7 @@ func SendJson(w http.ResponseWriter, code int, resp proto.Message) {
 func SendResponseWithContentType(w http.ResponseWriter, r *http.Request, code int, resp proto.Message) {
 	if r.Header.Get(consts.HeaderContentType) == consts.JsonContentType {
 		SendJson(w, code, resp)
-	} else if r.Header.Get(consts.HeaderContentType) == consts.ProtoContentType {
+	} else {
 		SendProto(w, code, resp)
 	}
 }
