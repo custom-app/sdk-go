@@ -4,40 +4,43 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/loyal-inform/sdk-go/logger"
 	"github.com/loyal-inform/sdk-go/service/ws/conn"
+	"github.com/loyal-inform/sdk-go/service/ws/opts"
 	"github.com/loyal-inform/sdk-go/structs"
-	"github.com/loyal-inform/sdk-go/util/locker"
 	"google.golang.org/protobuf/proto"
 	"net/http"
+	"sync"
 	"time"
 )
 
 type PrivatePool struct {
 	pools   map[structs.Role]sameRolePool
-	opts    *conn.ServerPrivateConnOptions
+	options *opts.ServerPrivateConnOptions
 	queue   chan *conn.PrivateMessage
 	timeout time.Duration
 }
 
 type sameRolePool struct {
-	lock  *locker.LockSystem
+	lock  *sync.RWMutex
 	conns map[int64]orderedConn
 }
 
 type orderedConn []*conn.ServerPrivateConn
 
-func NewPrivatePool(opts *conn.ServerPrivateConnOptions, roles []structs.Role,
-	timeout time.Duration, queueSize int) *PrivatePool {
+func NewPrivatePool(options *opts.ServerPrivateConnOptions, roles []structs.Role,
+	timeout time.Duration, queueSize int) (*PrivatePool, error) {
+	if err := opts.FillServerPrivateOptions(options); err != nil {
+		return nil, err
+	}
 	res := &PrivatePool{
 		pools:   map[structs.Role]sameRolePool{},
-		opts:    opts,
+		options: options,
 		queue:   make(chan *conn.PrivateMessage, queueSize),
 		timeout: timeout,
 	}
 	for _, r := range roles {
-		res.pools[r] = sameRolePool{conns: map[int64]orderedConn{}, lock: locker.NewLockSystem()}
+		res.pools[r] = sameRolePool{conns: map[int64]orderedConn{}, lock: &sync.RWMutex{}}
 	}
-	opts.Onauth = res.onauth
-	return res
+	return res, nil
 }
 
 func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*conn.ServerPrivateConn, error) {
@@ -45,7 +48,7 @@ func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*co
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
-	}, w, r, p.opts, p.onclose)
+	}, w, r, p.options, p.onauth, p.onclose)
 	if err != nil {
 		logger.Log("add connection failed: ", err)
 		return nil, err
@@ -57,7 +60,7 @@ func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*co
 				break
 			case <-time.After(p.timeout):
 				c.SendData(&conn.SentMessage{
-					Data: p.opts.OverflowMsg,
+					Data: p.options.OverflowMsg,
 				})
 				break
 			}
@@ -70,8 +73,8 @@ func (p *PrivatePool) onauth(c *conn.ServerPrivateConn) {
 	acc := c.GetAccount()
 
 	rolePool := p.pools[acc.Role]
-	rolePool.lock.Lock(acc.Id)
-	defer rolePool.lock.Unlock(acc.Id)
+	rolePool.lock.Lock()
+	defer rolePool.lock.Unlock()
 
 	// connection connId is into [1, +inf)
 	list := rolePool.conns[acc.Id]
@@ -93,13 +96,13 @@ func (p *PrivatePool) onauth(c *conn.ServerPrivateConn) {
 		}
 	}
 
-	p.pools[acc.Role].conns[acc.Id] = append(p.pools[acc.Role].conns[acc.Id], c)
+	rolePool.conns[acc.Id] = append(rolePool.conns[acc.Id], c)
 }
 
 func (p *PrivatePool) onclose(acc *structs.Account, connId int64) {
 	rolePool := p.pools[acc.Role]
-	rolePool.lock.Lock(acc.Id)
-	defer rolePool.lock.Unlock(acc.Id)
+	rolePool.lock.Lock()
+	defer rolePool.lock.Unlock()
 	index := -1
 	for i, c := range rolePool.conns[acc.Id] {
 		if c.ConnId() == connId {
@@ -115,8 +118,8 @@ func (p *PrivatePool) onclose(acc *structs.Account, connId int64) {
 }
 
 func (p *PrivatePool) SendOnSubAll(role structs.Role, kind structs.SubKind, id, connId int64, data proto.Message, force bool) {
-	for setId, set := range p.pools[role].conns {
-		p.pools[role].lock.Lock(setId)
+	p.pools[role].lock.RLock()
+	for _, set := range p.pools[role].conns {
 		for _, c := range set {
 			acc := c.GetAccount()
 			subValue := c.GetSub(kind)
@@ -127,13 +130,13 @@ func (p *PrivatePool) SendOnSubAll(role structs.Role, kind structs.SubKind, id, 
 				})
 			}
 		}
-		p.pools[role].lock.Unlock(setId)
 	}
+	p.pools[role].lock.RUnlock()
 }
 
 func (p *PrivatePool) SendOnSubReceivers(role structs.Role, kind structs.SubKind, id, connId int64, data proto.Message, force bool, receivers []int64) {
+	p.pools[role].lock.RLock()
 	for _, recId := range receivers {
-		p.pools[role].lock.Lock(recId)
 		for _, c := range p.pools[role].conns[recId] {
 			acc := c.GetAccount()
 			subValue := c.GetSub(kind)
@@ -144,14 +147,14 @@ func (p *PrivatePool) SendOnSubReceivers(role structs.Role, kind structs.SubKind
 				})
 			}
 		}
-		p.pools[role].lock.Unlock(recId)
 	}
+	p.pools[role].lock.RUnlock()
 }
 
 func (p *PrivatePool) HandleAccountDrop(upd *structs.Account) {
 	logger.Info("handling account drop", upd)
-	p.pools[upd.Role].lock.Lock(upd.Id)
-	defer p.pools[upd.Role].lock.Unlock(upd.Id)
+	p.pools[upd.Role].lock.Lock()
+	defer p.pools[upd.Role].lock.Unlock()
 	list := p.pools[upd.Role].conns[upd.Id]
 	p.pools[upd.Role].conns[upd.Id] = nil
 	for _, v := range list {
@@ -196,13 +199,13 @@ func (p *PrivatePool) GetQueue() chan *conn.PrivateMessage {
 
 func (p *PrivatePool) Close() {
 	for _, v := range p.pools {
-		for id, list := range v.conns {
-			v.lock.Lock(id)
-			for _, c := range list {
+		v.lock.Lock()
+		for id := range v.conns {
+			for _, c := range v.conns[id] {
 				go c.Close()
 			}
-			v.lock.Unlock(id)
 		}
+		v.lock.Unlock()
 	}
 	close(p.queue)
 }

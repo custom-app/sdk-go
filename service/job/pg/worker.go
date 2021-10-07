@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/jackc/pgx/v4"
 	"github.com/loyal-inform/sdk-go/db/pg"
+	"github.com/loyal-inform/sdk-go/logger"
 	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"time"
@@ -32,10 +33,13 @@ func MakeJob(ctx context.Context, options pgx.TxOptions, worker DatabaseWorker,
 	var res error
 	select {
 	case <-ctx.Done():
+		logger.Info("job ctx done")
 		tx.Rollback(ctx)
 		<-resCh
+		close(resCh)
 		res = TimeoutErr
 	case res = <-resCh:
+		close(resCh)
 		break
 	}
 	return res
@@ -58,10 +62,13 @@ func MakeJobWithResponse(ctx context.Context, options pgx.TxOptions, worker Data
 	var res proto.Message
 	select {
 	case <-ctx.Done():
+		logger.Info("job with response ctx done")
 		tx.Rollback(ctx)
 		res = <-resCh
+		close(resCh)
 		return nil, TimeoutErr
 	case res = <-resCh:
+		close(resCh)
 		break
 	}
 	return res, nil
@@ -84,10 +91,13 @@ func MakeJobWithResult(ctx context.Context, options pgx.TxOptions, worker Databa
 	var res structs.Result
 	select {
 	case <-ctx.Done():
+		logger.Info("job with result ctx done")
 		tx.Rollback(ctx)
 		res = <-resCh
+		close(resCh)
 		return nil, TimeoutErr
 	case res = <-resCh:
+		close(resCh)
 		break
 	}
 	return res, nil

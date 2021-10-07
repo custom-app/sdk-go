@@ -1,9 +1,9 @@
 package conn
 
 import (
-	"errors"
 	"github.com/gorilla/websocket"
 	"github.com/loyal-inform/sdk-go/logger"
+	"github.com/loyal-inform/sdk-go/service/ws/opts"
 	"github.com/loyal-inform/sdk-go/structs"
 	"github.com/loyal-inform/sdk-go/util/consts"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -21,19 +21,11 @@ var (
 		websocket.CloseMessageTooBig, websocket.CloseMandatoryExtension, websocket.CloseInternalServerErr,
 		websocket.CloseServiceRestart, websocket.CloseTryAgainLater, websocket.CloseTLSHandshake,
 	}
-	marshaler = &protojson.MarshalOptions{
+	marshaller = &protojson.MarshalOptions{
 		UseProtoNames:   true,
 		UseEnumNumbers:  true,
 		EmitUnpopulated: true,
 	}
-	OptsRequiredErr = errors.New("opts required")
-)
-
-const (
-	defaultReceiveBufSize = 10
-	defaultSendBufSize    = 10
-	defaultBufTimeout     = 10 * time.Second
-	defaultPingPeriod     = time.Second * 45
 )
 
 type MessageHandler func(*Conn, *structs.Account, []byte) structs.Result
@@ -55,18 +47,9 @@ type SentMessage struct {
 	IsResponse bool
 }
 
-type Options struct {
-	ContentType                       string
-	OverflowMsg                       proto.Message
-	OverflowMsgJson, OverflowMsgProto []byte
-	ReceiveBufSize                    int
-	SendBufSize                       int
-	ReceiveBufTimeout, PingPeriod     time.Duration
-}
-
 type Conn struct {
 	conn        *websocket.Conn // собственно, соединение
-	opts        *Options
+	options     *opts.Options
 	contentType string
 	isAlive     int32 // счетчик для определения, живо ли соединение
 
@@ -82,81 +65,49 @@ type Conn struct {
 	subscriptions map[structs.SubKind]bool // активированные подписки
 }
 
-func fillOpts(opts *Options) error {
-	var err error
-	if opts.OverflowMsgJson == nil {
-		opts.OverflowMsgJson, err = marshaler.Marshal(opts.OverflowMsg)
-		if err != nil {
-			return err
-		}
+func newConn(conn *websocket.Conn, options *opts.Options, needStart bool) (*Conn, error) {
+	if options == nil {
+		return nil, opts.RequiredOptsErr
 	}
-	if opts.OverflowMsgProto == nil {
-		opts.OverflowMsgProto, err = proto.Marshal(opts.OverflowMsg)
-		if err != nil {
-			return err
-		}
-	}
-	if opts.ReceiveBufTimeout == 0 {
-		opts.ReceiveBufTimeout = defaultBufTimeout
-	}
-	if opts.PingPeriod == 0 {
-		opts.PingPeriod = defaultPingPeriod
-	}
-	if opts.ContentType == "" {
-		opts.ContentType = consts.ProtoContentType
-	}
-	if opts.ReceiveBufSize == 0 {
-		opts.ReceiveBufSize = defaultReceiveBufSize
-	}
-	if opts.SendBufSize == 0 {
-		opts.SendBufSize = defaultSendBufSize
-	}
-	return nil
-}
-
-func newConn(conn *websocket.Conn, opts *Options, needStart bool) (*Conn, error) {
-	if opts == nil {
-		return nil, OptsRequiredErr
-	}
-	err := fillOpts(opts)
+	err := opts.FillOpts(options)
 	if err != nil {
 		return nil, err
 	}
 	res := &Conn{
-		contentType:   opts.ContentType,
+		contentType:   options.ContentType,
 		conn:          conn,
 		sendLock:      &sync.Mutex{},
 		wg:            &sync.WaitGroup{},
 		subLock:       &sync.RWMutex{},
 		subscriptions: map[structs.SubKind]bool{},
 		sendDataLock:  &sync.Mutex{},
-		sendBuf:       make(chan *SentMessage, opts.SendBufSize),
+		sendBuf:       make(chan *SentMessage, options.SendBufSize),
 		sendCloseCh:   make(chan bool),
 		pingCloseCh:   make(chan bool),
-		opts:          opts,
+		options:       options,
 	}
 	if needStart {
-		res.receiveBuf = make(chan *ReceivedMessage, opts.ReceiveBufSize)
+		res.receiveBuf = make(chan *ReceivedMessage, options.ReceiveBufSize)
 		res.start()
 	}
 
 	return res, nil
 }
 
-func NewConn(conn *websocket.Conn, opts *Options) (*Conn, error) {
-	return newConn(conn, opts, true)
+func NewConn(conn *websocket.Conn, options *opts.Options) (*Conn, error) {
+	return newConn(conn, options, true)
 }
 
-func UpgradeConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request, opts *Options) (*Conn, error) {
+func UpgradeConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request, options *opts.Options) (*Conn, error) {
 	defer r.Body.Close()
-	if opts == nil {
-		return nil, OptsRequiredErr
+	if options == nil {
+		return nil, opts.RequiredOptsErr
 	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return nil, err
 	}
-	res, err := NewConn(conn, opts)
+	res, err := NewConn(conn, options)
 	if err != nil {
 		return nil, err
 	}
@@ -175,8 +126,8 @@ func (c *Conn) sendProto(data proto.Message) {
 		bytes []byte
 		err   error
 	)
-	if c.opts.ContentType == consts.JsonContentType {
-		bytes, err = marshaler.Marshal(data)
+	if c.options.ContentType == consts.JsonContentType {
+		bytes, err = marshaller.Marshal(data)
 	} else {
 		bytes, err = proto.Marshal(data)
 	}
@@ -204,10 +155,10 @@ func (c *Conn) send(data []byte) {
 }
 
 func (c *Conn) sendOverflowMessage() {
-	if c.opts.ContentType == consts.JsonContentType {
-		c.send(c.opts.OverflowMsgJson)
+	if c.options.ContentType == consts.JsonContentType {
+		c.send(c.options.OverflowMsgJson)
 	} else {
-		c.send(c.opts.OverflowMsgProto)
+		c.send(c.options.OverflowMsgProto)
 	}
 }
 
@@ -234,7 +185,7 @@ func (c *Conn) listenReceive() {
 			Data: msg,
 		}:
 			break
-		case <-time.After(c.opts.ReceiveBufTimeout):
+		case <-time.After(c.options.ReceiveBufTimeout):
 			c.wg.Done()
 			c.sendOverflowMessage()
 		}
@@ -276,7 +227,7 @@ func (c *Conn) ping() {
 
 func (c *Conn) writeBytes(data []byte) {
 	if data != nil {
-		if c.opts.ContentType == consts.JsonContentType {
+		if c.options.ContentType == consts.JsonContentType {
 			if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				logger.Log("ws send msg err: ", err)
 			}
@@ -292,7 +243,7 @@ func (c *Conn) pingPong() {
 L:
 	for {
 		select {
-		case <-time.After(c.opts.PingPeriod):
+		case <-time.After(c.options.PingPeriod):
 			c.processSendData(sendData{
 				isPing: true,
 			})
@@ -345,7 +296,7 @@ func (c *Conn) SetSub(kind structs.SubKind, value bool) {
 }
 
 func (c *Conn) ContentType() string {
-	return c.opts.ContentType
+	return c.options.ContentType
 }
 
 func (c *Conn) Close() {

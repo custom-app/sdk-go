@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
+	"sync"
+)
+
+var (
+	once = &sync.Once{}
 )
 
 type AuthProvider interface {
@@ -58,5 +63,7 @@ func DropOldTokens(ctx context.Context, timestamp int64) error {
 }
 
 func SetDefaultAuth(f AuthProvider) {
-	defaultAuth = f
+	once.Do(func() {
+		defaultAuth = f
+	})
 }

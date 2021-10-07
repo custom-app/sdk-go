@@ -5,6 +5,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/loyal-inform/sdk-go/logger"
 	"github.com/loyal-inform/sdk-go/service/ws/conn"
+	"github.com/loyal-inform/sdk-go/service/ws/opts"
 	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"net/http"
@@ -15,16 +16,16 @@ import (
 type PublicPool struct {
 	conns    map[int64]*conn.ServerPublicConn
 	connLock *sync.RWMutex
-	opts     *conn.ServerPublicConnOptions
+	options  *opts.ServerPublicConnOptions
 	queue    chan *conn.PublicMessage
 	timeout  time.Duration
 }
 
-func NewPublicPool(opts *conn.ServerPublicConnOptions,
+func NewPublicPool(options *opts.ServerPublicConnOptions,
 	timeout time.Duration, queueSize int) *PublicPool {
 	res := &PublicPool{
 		conns:    map[int64]*conn.ServerPublicConn{},
-		opts:     opts,
+		options:  options,
 		connLock: &sync.RWMutex{},
 		queue:    make(chan *conn.PublicMessage, queueSize),
 		timeout:  timeout,
@@ -44,7 +45,7 @@ func (p *PublicPool) AddConnection(w http.ResponseWriter, r *http.Request) (*con
 		CheckOrigin: func(r *http.Request) bool {
 			return true
 		},
-	}, w, r, p.opts, nil)
+	}, w, r, p.options, nil)
 	if err != nil {
 		logger.Log("add connection failed: ", err)
 		return nil, err
@@ -57,7 +58,7 @@ func (p *PublicPool) AddConnection(w http.ResponseWriter, r *http.Request) (*con
 				break
 			case <-time.After(p.timeout):
 				c.SendData(&conn.SentMessage{
-					Data: p.opts.OverflowMsg,
+					Data: p.options.OverflowMsg,
 				})
 				break
 			}

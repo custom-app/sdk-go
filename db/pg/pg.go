@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/loyal-inform/sdk-go/logger"
+	"sync"
 	"time"
 )
 
@@ -114,12 +115,18 @@ type Request struct {
 	err         error
 	empty, next bool
 	t           *Transaction
+	lock        *sync.Mutex
 }
 
 func NewRequest(query string, params ...interface{}) *Request {
+	return newRequestWithLock(query, &sync.Mutex{}, params...)
+}
+
+func newRequestWithLock(query string, lock *sync.Mutex, params ...interface{}) *Request {
 	return &Request{
 		query:  query,
 		params: params,
+		lock:   lock,
 	}
 }
 
@@ -128,11 +135,13 @@ func (r *Request) RowsAffected() int64 {
 }
 
 func (r *Request) Exec(ctx context.Context) error {
+	r.lock.Lock()
 	if r.t != nil {
 		r.tag, r.err = r.t.tx.Exec(ctx, r.query, r.params...)
 	} else {
 		r.tag, r.err = db.Exec(ctx, r.query, r.params...)
 	}
+	r.lock.Unlock()
 	if r.err != nil {
 		logError("request exec", r.err)
 	}
@@ -140,11 +149,13 @@ func (r *Request) Exec(ctx context.Context) error {
 }
 
 func (r *Request) Query(ctx context.Context) error {
+	r.lock.Lock()
 	if r.t != nil {
 		r.rows, r.err = r.t.tx.Query(ctx, r.query, r.params...)
 	} else {
 		r.rows, r.err = db.Query(ctx, r.query, r.params...)
 	}
+	r.lock.Unlock()
 	if r.err == nil {
 		r.next = r.rows.Next()
 		r.empty = !r.next
@@ -161,11 +172,13 @@ func (r *Request) Query(ctx context.Context) error {
 }
 
 func (r *Request) QueryRow(ctx context.Context) {
+	r.lock.Lock()
 	if r.t != nil {
 		r.row = r.t.tx.QueryRow(ctx, r.query, r.params...)
 	} else {
 		r.row = db.QueryRow(ctx, r.query, r.params...)
 	}
+	r.lock.Unlock()
 }
 
 func (r *Request) Close() {
@@ -188,6 +201,7 @@ func (r *Request) IsEmpty() bool {
 }
 
 func (r *Request) Scan(dest ...interface{}) error {
+	r.lock.Lock()
 	if r.row != nil {
 		r.err = r.row.Scan(dest...)
 	} else if r.rows != nil {
@@ -195,6 +209,7 @@ func (r *Request) Scan(dest ...interface{}) error {
 	} else {
 		r.err = fmt.Errorf("missing rows")
 	}
+	r.lock.Unlock()
 	if r.err != nil {
 		logError("request scan", r.err)
 	}
@@ -219,11 +234,17 @@ type Batch struct {
 	tag         pgconn.CommandTag
 	empty, next bool
 	err         error
+	lock        *sync.Mutex
 }
 
 func NewBatch() *Batch {
+	return newBatchWithLock(&sync.Mutex{})
+}
+
+func newBatchWithLock(lock *sync.Mutex) *Batch {
 	return &Batch{
-		b: &pgx.Batch{},
+		b:    &pgx.Batch{},
+		lock: lock,
 	}
 }
 
@@ -232,11 +253,13 @@ func (b *Batch) AddRequest(query string, params ...interface{}) {
 }
 
 func (b *Batch) Send(ctx context.Context) {
+	b.lock.Lock()
 	if b.t != nil {
 		b.res = b.t.tx.SendBatch(ctx, b.b)
 	} else {
 		b.res = db.SendBatch(ctx, b.b)
 	}
+	b.lock.Unlock()
 }
 
 func (b *Batch) RowsAffected() int64 {
@@ -244,7 +267,9 @@ func (b *Batch) RowsAffected() int64 {
 }
 
 func (b *Batch) Exec(_ context.Context) error {
+	b.lock.Lock()
 	b.tag, b.err = b.res.Exec()
+	b.lock.Unlock()
 	if b.err != nil {
 		logError("batch exec", b.err)
 	}
@@ -252,7 +277,9 @@ func (b *Batch) Exec(_ context.Context) error {
 }
 
 func (b *Batch) Query(_ context.Context) error {
+	b.lock.Lock()
 	b.rows, b.err = b.res.Query()
+	b.lock.Unlock()
 	if b.err == nil {
 		b.next = b.rows.Next()
 		b.empty = !b.next
@@ -269,7 +296,9 @@ func (b *Batch) Query(_ context.Context) error {
 }
 
 func (b *Batch) QueryRow() {
+	b.lock.Lock()
 	b.row = b.res.QueryRow()
+	b.lock.Unlock()
 }
 
 func (b *Batch) Close() {
@@ -277,9 +306,11 @@ func (b *Batch) Close() {
 }
 
 func (b *Batch) Release() {
+	b.lock.Lock()
 	if err := b.res.Close(); err != nil {
 		logError("batch release", err)
 	}
+	b.lock.Unlock()
 }
 
 func (b *Batch) HaveNext() bool {
@@ -313,6 +344,7 @@ type Transaction struct {
 	tx          pgx.Tx
 	isCommitted bool
 	err         error
+	lock        *sync.Mutex
 }
 
 func NewTransaction(ctx context.Context, opts pgx.TxOptions) (*Transaction, error) {
@@ -322,11 +354,14 @@ func NewTransaction(ctx context.Context, opts pgx.TxOptions) (*Transaction, erro
 		return nil, err
 	}
 	return &Transaction{
-		tx: tx,
+		tx:   tx,
+		lock: &sync.Mutex{},
 	}, nil
 }
 
 func (t *Transaction) Commit(ctx context.Context) error {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	if err := t.tx.Commit(ctx); err != nil {
 		logError("commit tx", err)
 		return err
@@ -336,6 +371,8 @@ func (t *Transaction) Commit(ctx context.Context) error {
 }
 
 func (t *Transaction) Rollback(ctx context.Context) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	if !t.isCommitted {
 		if err := t.tx.Rollback(ctx); err != nil {
 			logError("rollback tx", err)
@@ -344,7 +381,7 @@ func (t *Transaction) Rollback(ctx context.Context) {
 }
 
 func (t *Transaction) NewRequest(query string, params ...interface{}) *Request {
-	res := NewRequest(query, params...)
+	res := newRequestWithLock(query, t.lock, params...)
 	res.t = t
 	return res
 }

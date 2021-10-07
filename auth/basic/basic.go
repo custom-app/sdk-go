@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
+	"sync"
+)
+
+var (
+	once = &sync.Once{}
 )
 
 type AuthProvider interface {
@@ -38,5 +43,7 @@ func Logout(ctx context.Context, role structs.Role, id int64) error {
 }
 
 func SetDefaultAuth(f AuthProvider) {
-	defaultAuth = f
+	once.Do(func() {
+		defaultAuth = f
+	})
 }
