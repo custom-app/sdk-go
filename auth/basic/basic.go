@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	once = &sync.Once{}
+	providerLock = &sync.RWMutex{}
 )
 
 type AuthProvider interface {
@@ -24,6 +24,8 @@ var defaultAuth AuthProvider
 
 func Auth(ctx context.Context, login, password string, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, error) {
+	providerLock.RLock()
+	defer providerLock.RUnlock()
 	if defaultAuth == nil {
 		return nil, fmt.Errorf("unset provider")
 	}
@@ -32,6 +34,8 @@ func Auth(ctx context.Context, login, password string, platform structs.Platform
 
 func AuthWithInfo(ctx context.Context, login, password string, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, proto.Message, error) {
+	providerLock.RLock()
+	defer providerLock.RUnlock()
 	if defaultAuth == nil {
 		return nil, nil, fmt.Errorf("unset provider")
 	}
@@ -39,11 +43,13 @@ func AuthWithInfo(ctx context.Context, login, password string, platform structs.
 }
 
 func Logout(ctx context.Context, role structs.Role, id int64) error {
+	providerLock.RLock()
+	defer providerLock.RUnlock()
 	return defaultAuth.Logout(ctx, role, id)
 }
 
 func SetDefaultAuth(f AuthProvider) {
-	once.Do(func() {
-		defaultAuth = f
-	})
+	providerLock.Lock()
+	defaultAuth = f
+	providerLock.Unlock()
 }
