@@ -280,6 +280,7 @@ func NewClientPrivateConnWithRequest(url string, data proto.Message, options *op
 	}
 	header := http.Header{}
 	header.Set(consts.HeaderContentType, options.ContentType)
+	options.FillVersion(header)
 	c, err := newClientConn(url, header, options.ClientPublicConnOptions, false)
 	if err != nil {
 		return nil, err
@@ -304,6 +305,7 @@ func NewClientPrivateConnWithBasic(url, login, pass string, options *opts.Client
 	header.Set(consts.HeaderContentType, options.ContentType)
 	header.Set(consts.AuthHeader,
 		fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", login, pass)))))
+	options.FillVersion(header)
 	c, err := newClientConn(url, header, options.ClientPublicConnOptions, false)
 	if err != nil {
 		return nil, err
@@ -326,6 +328,7 @@ func NewClientPrivateConnWithToken(url, token string, options *opts.ClientPrivat
 	header := http.Header{}
 	header.Set(consts.HeaderContentType, options.ContentType)
 	header.Set(consts.AuthHeader, fmt.Sprintf("Bearer %s", token))
+	options.FillVersion(header)
 	c, err := newClientConn(url, header, options.ClientPublicConnOptions, false)
 	if err != nil {
 		return nil, err

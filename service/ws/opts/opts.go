@@ -7,6 +7,7 @@ import (
 	"github.com/loyal-inform/sdk-go/util/consts"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"net/http"
 	"time"
 )
 
@@ -63,6 +64,7 @@ type ClientPublicConnOptions struct {
 	*Options
 	RetryLimit              int
 	RetryPeriod, SubTimeout time.Duration
+	FillVersion             func(http.Header)
 }
 
 type ClientPrivateConnOptions struct {
