@@ -36,6 +36,14 @@ func GroupSize(g SizeGroup) uint {
 	return groupSizes[g]
 }
 
+func SplitComplexId(id []int64) (string, int64) {
+	subPath := make([]string, len(id)-1)
+	for ind, i := range id[:len(id)-1] {
+		subPath[ind] = fmt.Sprintf("%d", i)
+	}
+	return filepath.Join(subPath...), id[len(id)-1]
+}
+
 func ResizeImage(img image.Image, size uint) image.Image {
 	if size == 0 {
 		return img
