@@ -101,6 +101,10 @@ func (p *Provider) LoadObject(_ context.Context, path string) ([]byte, error) {
 }
 
 func (p *Provider) PutObject(_ context.Context, path string, data []byte, _ string) error {
+	dir,_ := filepath.Split(path)
+	if err := os.MkdirAll(dir, os.ModeDir); err != nil {
+		return err
+	}
 	return ioutil.WriteFile(filepath.Join(p.root, path), data, os.ModePerm)
 }
 
@@ -109,5 +113,9 @@ func (p *Provider) RemoveObject(_ context.Context, path string) error {
 }
 
 func (p *Provider) MoveObject(_ context.Context, oldPath, newPath string) error {
+	dir,_ := filepath.Split(newPath)
+	if err := os.MkdirAll(dir, os.ModeDir); err != nil {
+		return err
+	}
 	return os.Rename(filepath.Join(p.root, oldPath), filepath.Join(p.root, newPath))
 }
