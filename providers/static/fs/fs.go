@@ -121,3 +121,7 @@ func (p *Provider) MoveObject(_ context.Context, oldPath, newPath string) error 
 	}
 	return os.Rename(filepath.Join(p.root, oldPath), newPath)
 }
+
+func (p *Provider) SourceName() string {
+	return "file system"
+}

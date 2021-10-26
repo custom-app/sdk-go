@@ -171,3 +171,6 @@ func (p *Provider) MoveObject(ctx context.Context, oldPath, newPath string) erro
 	return nil
 }
 
+func (p *Provider) SourceName() string {
+	return p.bucket
+}

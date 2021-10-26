@@ -111,3 +111,7 @@ func (p *Provider) MoveObject(ctx context.Context, oldPath, newPath string) erro
 	delete(files, oldPath)
 	return nil
 }
+
+func (p *Provider) SourceName() string {
+	return "empty"
+}

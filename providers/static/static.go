@@ -14,6 +14,7 @@ type Provider interface {
 	PutObject(ctx context.Context, path string, data []byte, contentType string) error
 	RemoveObject(ctx context.Context, path string) error
 	MoveObject(ctx context.Context, oldPath, newPath string) error
+	SourceName() string
 }
 
 var defaultProvider Provider = empty.NewProvider(map[string][]byte{})
@@ -48,4 +49,8 @@ func RemoveObject(ctx context.Context, path string) error {
 
 func MoveObject(ctx context.Context, oldPath, newPath string) error {
 	return defaultProvider.MoveObject(ctx, oldPath, newPath)
+}
+
+func SourceName() string {
+	return defaultProvider.SourceName()
 }
