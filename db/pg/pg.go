@@ -155,7 +155,6 @@ func (r *Request) Query(ctx context.Context) error {
 	} else {
 		r.rows, r.err = db.Query(ctx, r.query, r.params...)
 	}
-	r.lock.Unlock()
 	if r.err == nil {
 		r.next = r.rows.Next()
 		r.empty = !r.next
@@ -168,6 +167,7 @@ func (r *Request) Query(ctx context.Context) error {
 			logError("request query rows", r.err)
 		}
 	}
+	r.lock.Unlock()
 	return r.err
 }
 
@@ -182,10 +182,14 @@ func (r *Request) QueryRow(ctx context.Context) {
 }
 
 func (r *Request) Close() {
+	r.lock.Lock()
 	r.rows.Close()
+	r.lock.Unlock()
 }
 
 func (r *Request) HaveNext() bool {
+	r.lock.Lock()
+	defer r.lock.Unlock()
 	if r.next {
 		r.next = false
 		return true
@@ -221,6 +225,7 @@ func (r *Request) Clone() *Request {
 		query:  r.query,
 		params: r.params,
 		t:      r.t,
+		lock:   r.lock,
 	}
 }
 
@@ -249,7 +254,9 @@ func newBatchWithLock(lock *sync.Mutex) *Batch {
 }
 
 func (b *Batch) AddRequest(query string, params ...interface{}) {
+	b.lock.Lock()
 	b.b.Queue(query, params...)
+	b.lock.Unlock()
 }
 
 func (b *Batch) Send(ctx context.Context) {
@@ -263,6 +270,8 @@ func (b *Batch) Send(ctx context.Context) {
 }
 
 func (b *Batch) RowsAffected() int64 {
+	b.lock.Lock()
+	defer b.lock.Unlock()
 	return b.tag.RowsAffected()
 }
 
@@ -279,7 +288,6 @@ func (b *Batch) Exec(_ context.Context) error {
 func (b *Batch) Query(_ context.Context) error {
 	b.lock.Lock()
 	b.rows, b.err = b.res.Query()
-	b.lock.Unlock()
 	if b.err == nil {
 		b.next = b.rows.Next()
 		b.empty = !b.next
@@ -292,6 +300,7 @@ func (b *Batch) Query(_ context.Context) error {
 		}
 		b.err = b.rows.Err()
 	}
+	b.lock.Unlock()
 	return b.err
 }
 
@@ -302,7 +311,9 @@ func (b *Batch) QueryRow() {
 }
 
 func (b *Batch) Close() {
+	b.lock.Lock()
 	b.rows.Close()
+	b.lock.Unlock()
 }
 
 func (b *Batch) Release() {
@@ -314,6 +325,8 @@ func (b *Batch) Release() {
 }
 
 func (b *Batch) HaveNext() bool {
+	b.lock.Lock()
+	defer b.lock.Unlock()
 	if b.next {
 		b.next = false
 		return true
@@ -325,6 +338,7 @@ func (b *Batch) HaveNext() bool {
 }
 
 func (b *Batch) Scan(values ...interface{}) error {
+	b.lock.Lock()
 	if b.row != nil {
 		b.err = b.row.Scan(values...)
 	} else if b.rows != nil {
@@ -332,6 +346,7 @@ func (b *Batch) Scan(values ...interface{}) error {
 	} else {
 		b.err = fmt.Errorf("missing rows")
 	}
+	b.lock.Unlock()
 	if b.err != nil {
 		logError("batch scan err", b.err)
 		return b.err
