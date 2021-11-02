@@ -305,9 +305,6 @@ func NewClientPrivateConnWithRequest(url string, data proto.Message, options *op
 		receiveBuf:          make(chan *ClientPrivateMessage, options.ReceiveBufSize),
 	}
 	res.start()
-	if err := res.Auth(); err != nil {
-		return nil, err
-	}
 	return res, nil
 }
 
