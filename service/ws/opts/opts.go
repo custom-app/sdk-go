@@ -65,6 +65,7 @@ type ClientPublicConnOptions struct {
 	RetryLimit              int
 	RetryPeriod, SubTimeout time.Duration
 	FillVersion             func(http.Header)
+	NeedRestart             bool
 }
 
 type ClientPrivateConnOptions struct {

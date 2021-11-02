@@ -52,18 +52,24 @@ func newClientConn(url string, header http.Header, options *opts.ClientPublicCon
 		return nil, err
 	}
 	dialer := &websocket.Dialer{}
-	var (
-		conn *websocket.Conn
-		err  error
-	)
-	for i := 0; i < options.RetryLimit; i++ {
-		conn, _, err = dialer.Dial(url, header)
-		if err != nil {
-			conn = nil
-			time.Sleep(options.RetryPeriod)
-			continue
+	conn, _, err := dialer.Dial(url, header)
+	if err != nil {
+		if options.NeedRestart {
+			for i := 0; i < options.RetryLimit; i++ {
+				conn, _, err = dialer.Dial(url, header)
+				if err != nil {
+					conn = nil
+					time.Sleep(options.RetryPeriod)
+					continue
+				}
+				break
+			}
+			if err != nil && conn == nil {
+				return nil, err
+			}
+		} else {
+			return nil, err
 		}
-		break
 	}
 	options.ContentType = header.Get(consts.HeaderContentType)
 	c, err := newConn(conn, options.Options, false)
@@ -75,7 +81,7 @@ func newClientConn(url string, header http.Header, options *opts.ClientPublicCon
 		Conn:            c,
 		url:             url,
 		header:          header,
-		needRestart:     true,
+		needRestart:     options.NeedRestart,
 		subData:         map[structs.SubKind]clientSubData{},
 		subDataLock:     &sync.RWMutex{},
 		needRestartLock: &sync.RWMutex{},
@@ -88,6 +94,9 @@ func newClientConn(url string, header http.Header, options *opts.ClientPublicCon
 }
 
 func NewClientConn(url string, header http.Header, options *opts.ClientPublicConnOptions) (*ClientPublicConn, error) {
+	if options.FillVersion != nil {
+		options.FillVersion(header)
+	}
 	return newClientConn(url, header, options, true)
 }
 
@@ -280,7 +289,9 @@ func NewClientPrivateConnWithRequest(url string, data proto.Message, options *op
 	}
 	header := http.Header{}
 	header.Set(consts.HeaderContentType, options.ContentType)
-	options.FillVersion(header)
+	if options.FillVersion != nil {
+		options.FillVersion(header)
+	}
 	c, err := newClientConn(url, header, options.ClientPublicConnOptions, false)
 	if err != nil {
 		return nil, err
@@ -305,7 +316,9 @@ func NewClientPrivateConnWithBasic(url, login, pass string, options *opts.Client
 	header.Set(consts.HeaderContentType, options.ContentType)
 	header.Set(consts.AuthHeader,
 		fmt.Sprintf("Basic %s", base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", login, pass)))))
-	options.FillVersion(header)
+	if options.FillVersion != nil {
+		options.FillVersion(header)
+	}
 	c, err := newClientConn(url, header, options.ClientPublicConnOptions, false)
 	if err != nil {
 		return nil, err
@@ -328,7 +341,9 @@ func NewClientPrivateConnWithToken(url, token string, options *opts.ClientPrivat
 	header := http.Header{}
 	header.Set(consts.HeaderContentType, options.ContentType)
 	header.Set(consts.AuthHeader, fmt.Sprintf("Bearer %s", token))
-	options.FillVersion(header)
+	if options.FillVersion != nil {
+		options.FillVersion(header)
+	}
 	c, err := newClientConn(url, header, options.ClientPublicConnOptions, false)
 	if err != nil {
 		return nil, err
