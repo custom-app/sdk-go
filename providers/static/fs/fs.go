@@ -39,21 +39,14 @@ func (p *Provider) SaveImage(_ context.Context, id []int64, imgBytes []byte, siz
 		}
 	}
 	subPath, realId := util.SplitComplexId(id)
-	exists := err == nil
 	for _, group := range sizeGroup {
-		if exists {
-			if err := os.Remove(filepath.Join(p.root, string(group), kind,
-				subPath, fmt.Sprintf("%d", realId))); err != nil {
-				return err
-			}
-		}
 		toSaveImg := util.ResizeImage(img, util.GroupSize(group))
 		if err := os.MkdirAll(filepath.Join(p.root, string(group), kind, subPath), os.ModePerm); err != nil {
 			return err
 		}
 		file, err := os.OpenFile(filepath.Join(p.root, string(group), kind,
 			subPath, fmt.Sprintf("%d", realId)),
-			os.O_CREATE|os.O_WRONLY, os.ModePerm)
+			os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 		if err != nil {
 			return err
 		}
