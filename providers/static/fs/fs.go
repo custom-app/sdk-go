@@ -90,7 +90,7 @@ func (p *Provider) RemoveMultiple(_ context.Context, ids [][]int64, sizeGroup []
 }
 
 func (p *Provider) LoadObject(_ context.Context, path string) ([]byte, error) {
-	return ioutil.ReadFile(path)
+	return ioutil.ReadFile(filepath.Join(p.root, path))
 }
 
 func (p *Provider) PutObject(_ context.Context, path string, data []byte, _ string) error {
