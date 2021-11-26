@@ -32,10 +32,12 @@ type ServerPublicConn struct {
 	connIdLock *sync.RWMutex
 	connId     int64
 	receiveBuf chan *PublicMessage
+	reqHeader  http.Header
 	Onclose    func(int64)
 }
 
-func newServerPublicConn(conn *websocket.Conn, options *opts.ServerPublicConnOptions, onclose func(int64), needStart bool) (*ServerPublicConn, error) {
+func newServerPublicConn(conn *websocket.Conn, options *opts.ServerPublicConnOptions,
+	onclose func(int64), needStart bool, reqHeader http.Header) (*ServerPublicConn, error) {
 	if options == nil {
 		return nil, opts.RequiredOptsErr
 	}
@@ -51,6 +53,7 @@ func newServerPublicConn(conn *websocket.Conn, options *opts.ServerPublicConnOpt
 		opts:       options,
 		Onclose:    onclose,
 		connIdLock: &sync.RWMutex{},
+		reqHeader:  reqHeader,
 	}
 	if needStart {
 		res.receiveBuf = make(chan *PublicMessage, options.ReceiveBufSize)
@@ -59,8 +62,9 @@ func newServerPublicConn(conn *websocket.Conn, options *opts.ServerPublicConnOpt
 	return res, nil
 }
 
-func NewServerPublicConn(conn *websocket.Conn, options *opts.ServerPublicConnOptions, onclose func(int64)) (*ServerPublicConn, error) {
-	return newServerPublicConn(conn, options, onclose, true)
+func NewServerPublicConn(conn *websocket.Conn, options *opts.ServerPublicConnOptions,
+	onclose func(int64), reqHeader http.Header) (*ServerPublicConn, error) {
+	return newServerPublicConn(conn, options, onclose, true, reqHeader)
 }
 
 func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
@@ -79,7 +83,7 @@ func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter
 	if err := r.Body.Close(); err != nil {
 		return nil, err
 	}
-	res, err := NewServerPublicConn(conn, options, onclose)
+	res, err := NewServerPublicConn(conn, options, onclose, r.Header)
 	if err != nil {
 		return nil, err
 	}
@@ -140,6 +144,13 @@ func (c *ServerPublicConn) SetConnId(value int64) {
 	c.connIdLock.Unlock()
 }
 
+func (c *ServerPublicConn) HeaderValue(key string) string {
+	if c.reqHeader == nil {
+		return ""
+	}
+	return c.reqHeader.Get(key)
+}
+
 func (c *ServerPublicConn) ConnId() int64 {
 	c.connIdLock.RLock()
 	res := c.connId
@@ -188,14 +199,15 @@ type ServerPrivateConn struct {
 }
 
 func NewServerPrivateConn(conn *websocket.Conn, options *opts.ServerPrivateConnOptions,
-	onauth func(*ServerPrivateConn), onclose func(*structs.Account, int64)) (*ServerPrivateConn, error) {
+	onauth func(*ServerPrivateConn), onclose func(*structs.Account, int64),
+	reqHeader http.Header) (*ServerPrivateConn, error) {
 	if options == nil {
 		return nil, opts.RequiredOptsErr
 	}
 	if err := opts.FillServerPrivateOptions(options); err != nil {
 		return nil, err
 	}
-	c, err := newServerPublicConn(conn, options.ServerPublicConnOptions, nil, false)
+	c, err := newServerPublicConn(conn, options.ServerPublicConnOptions, nil, false, reqHeader)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +257,7 @@ func privateServerConnViaToken(upgrader *websocket.Upgrader, w http.ResponseWrit
 	if err := r.Body.Close(); err != nil {
 		return nil, err
 	}
-	res, err := NewServerPrivateConn(conn, options, onauth, onclose)
+	res, err := NewServerPrivateConn(conn, options, onauth, onclose, r.Header)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +288,7 @@ func privateServerConnViaBasic(upgrader *websocket.Upgrader, w http.ResponseWrit
 	if err := r.Body.Close(); err != nil {
 		return nil, err
 	}
-	res, err := NewServerPrivateConn(conn, options, onauth, onclose)
+	res, err := NewServerPrivateConn(conn, options, onauth, onclose, r.Header)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +308,7 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 	if err := r.Body.Close(); err != nil {
 		return nil, err
 	}
-	res, err := NewServerPrivateConn(conn, options, onauth, onclose)
+	res, err := NewServerPrivateConn(conn, options, onauth, onclose, r.Header)
 	if err != nil {
 		return nil, err
 	}
