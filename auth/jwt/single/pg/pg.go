@@ -77,17 +77,17 @@ func (m *AuthorizationMaker) Auth(ctx context.Context, token string, purpose str
 		Options:      pgx.TxOptions{},
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
-		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, []func(), error) {
 			acc, err = m.checkToken(ctx, tx, t, purpose)
 			if err != nil {
-				return err
+				return false, nil, err
 			}
 			for _, r := range disabled {
 				if r == acc.Role {
-					return auth.PermissionDeniedErr
+					return false, nil, auth.PermissionDeniedErr
 				}
 			}
-			return nil
+			return false, nil, nil
 		},
 	}); err != nil {
 		return nil, err
@@ -111,18 +111,18 @@ func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, token string, pur
 		Options:      pgx.TxOptions{},
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
-		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, []func(), error) {
 			acc, err = m.checkToken(ctx, tx, t, purpose)
 			if err != nil {
-				return err
+				return false, nil, err
 			}
 			for _, r := range disabled {
 				if r == acc.Role {
-					return auth.PermissionDeniedErr
+					return false, nil, auth.PermissionDeniedErr
 				}
 			}
 			resp = m.accountLoader(ctx, tx, acc)
-			return nil
+			return false, nil, nil
 		},
 	}); err != nil {
 		return nil, nil, err
@@ -137,14 +137,14 @@ func (m *AuthorizationMaker) Logout(ctx context.Context, role structs.Role, id i
 		Options:      pgx.TxOptions{},
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
-		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, []func(), error) {
 			if err := m.dropToken(ctx, tx, role, id, structs.PurposeAccess); err != nil {
-				return err
+				return false, nil, err
 			}
 			if err := m.dropToken(ctx, tx, role, id, structs.PurposeRefresh); err != nil {
-				return err
+				return false, nil, err
 			}
-			return tx.Commit(ctx)
+			return true, nil, nil
 		},
 	})
 }
@@ -286,14 +286,14 @@ func (m *AuthorizationMaker) CreateTokens(ctx context.Context, role structs.Role
 		Options:      pgx.TxOptions{},
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
-		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, []func(), error) {
 			m.lockers[role].Lock(id)
 			defer m.lockers[role].Unlock(id)
 			accessToken, accessExpires, refreshToken, refreshExpires, err = m.createTokens(ctx, tx, role, id)
 			if err != nil {
-				return err
+				return false, nil, err
 			}
-			return tx.Commit(ctx)
+			return true, nil, nil
 		},
 	}); err != nil {
 		return "", 0, "", 0, err
@@ -342,16 +342,16 @@ func (m *AuthorizationMaker) DropOldTokens(ctx context.Context, timestamp int64)
 		Options:      pgx.TxOptions{},
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
-		Worker: func(ctx context.Context, tx *pg.Transaction) error {
+		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, []func(), error) {
 			for _, v := range m.tokenTables {
 				dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where number in "+
 					"(select number from %s where purpose=$1 and expires_at<=$2)", v, v),
 					structs.PurposeRefresh, timestamp)
 				if err := dropReq.Exec(ctx); err != nil {
-					return err
+					return false, nil, err
 				}
 			}
-			return tx.Commit(ctx)
+			return true, nil, nil
 		},
 	})
 }

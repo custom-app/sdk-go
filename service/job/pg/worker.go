@@ -10,18 +10,45 @@ import (
 	"time"
 )
 
-const rollbackTimeout = 2 * time.Second
+const (
+	rollbackTimeout = 2 * time.Second
+	commitTimeout   = 2 * time.Second
+)
 
-type DatabaseWorker func(ctx context.Context, tx *pg.Transaction) error
+type DatabaseWorker func(ctx context.Context, tx *pg.Transaction) (needCommit bool, effects []func(), err error)
 
-type DatabaseWorkerWithResponse func(ctx context.Context, tx *pg.Transaction) proto.Message
+type DatabaseWorkerWithResponse func(ctx context.Context, tx *pg.Transaction) (
+	needCommit bool, effects []func(), msg proto.Message)
 
-type DatabaseWorkerWithResult func(ctx context.Context, tx *pg.Transaction) structs.Result
+type DatabaseWorkerWithResult func(ctx context.Context, tx *pg.Transaction) (needCommit bool, res structs.Result)
+
+type errRes struct {
+	needCommit bool
+	effects    []func()
+	err        error
+}
+
+type protoRes struct {
+	needCommit bool
+	effects    []func()
+	msg        proto.Message
+}
+
+type structRes struct {
+	needCommit bool
+	res        structs.Result
+}
 
 func rollbackWithTimeout(tx *pg.Transaction, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	tx.Rollback(ctx)
+}
+
+func commitWithTimeout(tx *pg.Transaction, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return tx.Commit(ctx)
 }
 
 func MakeJob(ctx context.Context, options pgx.TxOptions, worker DatabaseWorker,
@@ -34,9 +61,11 @@ func MakeJob(ctx context.Context, options pgx.TxOptions, worker DatabaseWorker,
 		return err
 	}
 	defer rollbackWithTimeout(tx, rollbackTimeout)
-	resCh := make(chan error)
+	resCh := make(chan errRes)
 	go func() {
-		resCh <- worker(ctx, tx)
+		var res errRes
+		res.needCommit, res.effects, res.err = worker(ctx, tx)
+		resCh <- res
 	}()
 	var res error
 	select {
@@ -48,8 +77,18 @@ func MakeJob(ctx context.Context, options pgx.TxOptions, worker DatabaseWorker,
 		logger.Info("job ctx done got result")
 		close(resCh)
 		res = TimeoutErr
-	case res = <-resCh:
+	case jobRes := <-resCh:
 		close(resCh)
+		if jobRes.needCommit {
+			if err := commitWithTimeout(tx, commitTimeout); err != nil {
+				res = err
+				break
+			}
+			for _, ef := range jobRes.effects {
+				ef()
+			}
+		}
+		res = jobRes.err
 		break
 	}
 	return res
@@ -65,9 +104,11 @@ func MakeJobWithResponse(ctx context.Context, options pgx.TxOptions, worker Data
 		return nil, err
 	}
 	defer rollbackWithTimeout(tx, rollbackTimeout)
-	resCh := make(chan proto.Message)
+	resCh := make(chan protoRes)
 	go func() {
-		resCh <- worker(ctx, tx)
+		var res protoRes
+		res.needCommit, res.effects, res.msg = worker(ctx, tx)
+		resCh <- res
 	}()
 	var res proto.Message
 	select {
@@ -75,12 +116,21 @@ func MakeJobWithResponse(ctx context.Context, options pgx.TxOptions, worker Data
 		logger.Info("job with response ctx done")
 		rollbackWithTimeout(tx, rollbackTimeout)
 		logger.Info("job with response ctx done tx rollback finished")
-		res = <-resCh
+		<-resCh
 		logger.Info("job with response ctx done got result")
 		close(resCh)
 		return nil, TimeoutErr
-	case res = <-resCh:
+	case jobRes := <-resCh:
 		close(resCh)
+		if jobRes.needCommit {
+			if err := commitWithTimeout(tx, commitTimeout); err != nil {
+				return nil, err
+			}
+			for _, ef := range jobRes.effects {
+				ef()
+			}
+		}
+		res = jobRes.msg
 		break
 	}
 	return res, nil
@@ -96,9 +146,11 @@ func MakeJobWithResult(ctx context.Context, options pgx.TxOptions, worker Databa
 		return nil, err
 	}
 	defer rollbackWithTimeout(tx, rollbackTimeout)
-	resCh := make(chan structs.Result)
+	resCh := make(chan structRes)
 	go func() {
-		resCh <- worker(ctx, tx)
+		var res structRes
+		res.needCommit, res.res = worker(ctx, tx)
+		resCh <- res
 	}()
 	var res structs.Result
 	select {
@@ -106,12 +158,21 @@ func MakeJobWithResult(ctx context.Context, options pgx.TxOptions, worker Databa
 		logger.Info("job with result ctx done")
 		rollbackWithTimeout(tx, rollbackTimeout)
 		logger.Info("job with result ctx done tx rollback finished")
-		res = <-resCh
+		<-resCh
 		logger.Info("job with result ctx done got result")
 		close(resCh)
 		return nil, TimeoutErr
-	case res = <-resCh:
+	case jobRes := <-resCh:
 		close(resCh)
+		if jobRes.needCommit {
+			if err := commitWithTimeout(tx, commitTimeout); err != nil {
+				return nil, err
+			}
+			for _, ef := range jobRes.res.GetEffects() {
+				ef()
+			}
+		}
+		res = jobRes.res
 		break
 	}
 	return res, nil

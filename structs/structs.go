@@ -33,12 +33,14 @@ type Result interface {
 	GetResponse() proto.Message
 	GetSubs() []SubData
 	GetAccountsToDrop() []*Account
+	GetEffects() []func()
 }
 
 type DefaultResult struct {
-	Response proto.Message
-	Subs []SubData
+	Response       proto.Message
+	Subs           []SubData
 	AccountsToDrop []*Account
+	Effects        []func()
 }
 
 func (d *DefaultResult) GetResponse() proto.Message {
@@ -51,4 +53,8 @@ func (d *DefaultResult) GetSubs() []SubData {
 
 func (d *DefaultResult) GetAccountsToDrop() []*Account {
 	return d.AccountsToDrop
+}
+
+func (d *DefaultResult) GetEffects() []func() {
+	return d.Effects
 }
