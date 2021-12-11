@@ -46,13 +46,13 @@ func (m *AuthorizationMaker) Auth(ctx context.Context, login, password string, p
 		Options:      pgx.TxOptions{},
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
-		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, []func(), error) {
+		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, *pg3.JobResultErr) {
 			var err error
 			acc, err = m.AuthWithTx(ctx, tx, login, password, platform, versions, disabled...)
 			if err != nil {
-				return false, nil, err
+				return false, pg3.WrapError(err)
 			}
-			return false, nil, nil
+			return false, nil
 		},
 	}); err != nil {
 		return nil, err
@@ -81,14 +81,14 @@ func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, login, password s
 		Options:      pgx.TxOptions{},
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
-		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, []func(), error) {
+		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, *pg3.JobResultErr) {
 			var err error
 			acc, err = m.findUserForLoginPass(ctx, tx, login, password, disabled...)
 			if err != nil {
-				return false, nil, err
+				return false, pg3.WrapError(err)
 			}
 			resp = m.accountLoader(ctx, tx, acc)
-			return false, nil, nil
+			return false, nil
 		},
 	}); err != nil {
 		return nil, nil, err

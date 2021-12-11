@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/jackc/pgx/v4"
 	"github.com/loyal-inform/sdk-go/db/pg"
-	"github.com/loyal-inform/sdk-go/logger"
 	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"time"
@@ -15,23 +14,35 @@ const (
 	commitTimeout   = 2 * time.Second
 )
 
-type DatabaseWorker func(ctx context.Context, tx *pg.Transaction) (needCommit bool, effects []func(), err error)
+type DatabaseWorker func(ctx context.Context, tx *pg.Transaction) (needCommit bool, res *JobResultErr)
 
 type DatabaseWorkerWithResponse func(ctx context.Context, tx *pg.Transaction) (
-	needCommit bool, effects []func(), msg proto.Message)
+	needCommit bool, res *JobResultProto)
 
 type DatabaseWorkerWithResult func(ctx context.Context, tx *pg.Transaction) (needCommit bool, res structs.Result)
 
-type errRes struct {
+type JobResultErr struct {
 	needCommit bool
-	effects    []func()
-	err        error
+	Effects    []func()
+	Err        error
 }
 
-type protoRes struct {
+func WrapError(err error) *JobResultErr {
+	return &JobResultErr{
+		Err: err,
+	}
+}
+
+type JobResultProto struct {
 	needCommit bool
-	effects    []func()
-	msg        proto.Message
+	Effects    []func()
+	Msg        proto.Message
+}
+
+func WrapMessage(msg proto.Message) *JobResultProto {
+	return &JobResultProto{
+		Msg: msg,
+	}
 }
 
 type structRes struct {
@@ -61,20 +72,20 @@ func MakeJob(ctx context.Context, options pgx.TxOptions, worker DatabaseWorker,
 		return err
 	}
 	defer rollbackWithTimeout(tx, rollbackTimeout)
-	resCh := make(chan errRes)
+	resCh := make(chan *JobResultErr)
 	go func() {
-		var res errRes
-		res.needCommit, res.effects, res.err = worker(ctx, tx)
+		needCommit, res := worker(ctx, tx)
+		if res == nil {
+			res = &JobResultErr{}
+		}
+		res.needCommit = needCommit
 		resCh <- res
 	}()
 	var res error
 	select {
 	case <-ctx.Done():
-		logger.Info("job ctx done")
 		rollbackWithTimeout(tx, rollbackTimeout)
-		logger.Info("job ctx done tx rollback finished")
 		<-resCh
-		logger.Info("job ctx done got result")
 		close(resCh)
 		res = TimeoutErr
 	case jobRes := <-resCh:
@@ -84,11 +95,11 @@ func MakeJob(ctx context.Context, options pgx.TxOptions, worker DatabaseWorker,
 				res = err
 				break
 			}
-			for _, ef := range jobRes.effects {
+			for _, ef := range jobRes.Effects {
 				ef()
 			}
 		}
-		res = jobRes.err
+		res = jobRes.Err
 		break
 	}
 	return res
@@ -104,20 +115,20 @@ func MakeJobWithResponse(ctx context.Context, options pgx.TxOptions, worker Data
 		return nil, err
 	}
 	defer rollbackWithTimeout(tx, rollbackTimeout)
-	resCh := make(chan protoRes)
+	resCh := make(chan *JobResultProto)
 	go func() {
-		var res protoRes
-		res.needCommit, res.effects, res.msg = worker(ctx, tx)
+		needCommit, res := worker(ctx, tx)
+		if res == nil {
+			res = &JobResultProto{}
+		}
+		res.needCommit = needCommit
 		resCh <- res
 	}()
 	var res proto.Message
 	select {
 	case <-ctx.Done():
-		logger.Info("job with response ctx done")
 		rollbackWithTimeout(tx, rollbackTimeout)
-		logger.Info("job with response ctx done tx rollback finished")
 		<-resCh
-		logger.Info("job with response ctx done got result")
 		close(resCh)
 		return nil, TimeoutErr
 	case jobRes := <-resCh:
@@ -126,11 +137,11 @@ func MakeJobWithResponse(ctx context.Context, options pgx.TxOptions, worker Data
 			if err := commitWithTimeout(tx, commitTimeout); err != nil {
 				return nil, err
 			}
-			for _, ef := range jobRes.effects {
+			for _, ef := range jobRes.Effects {
 				ef()
 			}
 		}
-		res = jobRes.msg
+		res = jobRes.Msg
 		break
 	}
 	return res, nil
@@ -155,11 +166,8 @@ func MakeJobWithResult(ctx context.Context, options pgx.TxOptions, worker Databa
 	var res structs.Result
 	select {
 	case <-ctx.Done():
-		logger.Info("job with result ctx done")
 		rollbackWithTimeout(tx, rollbackTimeout)
-		logger.Info("job with result ctx done tx rollback finished")
 		<-resCh
-		logger.Info("job with result ctx done got result")
 		close(resCh)
 		return nil, TimeoutErr
 	case jobRes := <-resCh:
@@ -168,8 +176,10 @@ func MakeJobWithResult(ctx context.Context, options pgx.TxOptions, worker Databa
 			if err := commitWithTimeout(tx, commitTimeout); err != nil {
 				return nil, err
 			}
-			for _, ef := range jobRes.res.GetEffects() {
-				ef()
+			if jobRes.res != nil {
+				for _, ef := range jobRes.res.GetEffects() {
+					ef()
+				}
 			}
 		}
 		res = jobRes.res
