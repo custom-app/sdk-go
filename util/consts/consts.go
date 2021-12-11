@@ -1,5 +1,7 @@
 package consts
 
+type CtxKey string
+
 const (
 	ApiPrefix = "/api"
 
@@ -12,8 +14,8 @@ const (
 	TokenStartInd    = len(TokenStart)
 	VersionDelimiter = ":"
 
-	PlatformCtxKey    = "platform"
-	VersionsCtxKey    = "versions"
-	AccountCtxKey     = "account"
-	TokenNumberCtxKey = "token_number"
+	PlatformCtxKey    = CtxKey("platform")
+	VersionsCtxKey    = CtxKey("versions")
+	AccountCtxKey     = CtxKey("account")
+	TokenNumberCtxKey = CtxKey("token_number")
 )
