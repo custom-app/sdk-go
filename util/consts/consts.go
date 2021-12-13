@@ -5,9 +5,10 @@ type CtxKey string
 const (
 	ApiPrefix = "/api"
 
-	HeaderContentType = "Content-Type"
-	JsonContentType   = "application/json"
-	ProtoContentType  = "application/x-protobuf"
+	HeaderContentType   = "Content-Type"
+	HeaderXForwardedFor = "X-Forwarded-For"
+	JsonContentType     = "application/json"
+	ProtoContentType    = "application/x-protobuf"
 
 	AuthHeader       = "Authorization"
 	TokenStart       = "Bearer "

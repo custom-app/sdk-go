@@ -321,7 +321,8 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 				IsResponse: err != AuthTimeoutErr,
 			})
 			if res.IsAlive() {
-				logger.Log("auth wait failed. closing connection", r.UserAgent(), e)
+				logger.Log("auth wait failed. closing connection", r.UserAgent(),
+					r.Header.Get(consts.HeaderXForwardedFor), e)
 				res.Close()
 			}
 			return

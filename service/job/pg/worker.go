@@ -84,7 +84,6 @@ func MakeJob(ctx context.Context, options pgx.TxOptions, worker DatabaseWorker,
 	var res error
 	select {
 	case <-ctx.Done():
-		rollbackWithTimeout(tx, rollbackTimeout)
 		<-resCh
 		close(resCh)
 		res = TimeoutErr
@@ -127,7 +126,6 @@ func MakeJobWithResponse(ctx context.Context, options pgx.TxOptions, worker Data
 	var res proto.Message
 	select {
 	case <-ctx.Done():
-		rollbackWithTimeout(tx, rollbackTimeout)
 		<-resCh
 		close(resCh)
 		return nil, TimeoutErr
@@ -166,7 +164,6 @@ func MakeJobWithResult(ctx context.Context, options pgx.TxOptions, worker Databa
 	var res structs.Result
 	select {
 	case <-ctx.Done():
-		rollbackWithTimeout(tx, rollbackTimeout)
 		<-resCh
 		close(resCh)
 		return nil, TimeoutErr
