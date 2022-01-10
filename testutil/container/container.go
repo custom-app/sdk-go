@@ -1,3 +1,6 @@
+// Package container - вспомогательный пакет для создания тестовой базы данных в контейнере.
+//
+// Для работы контейнер PostgreSQL создается отдельно пользователем
 package container
 
 import (
@@ -14,14 +17,14 @@ import (
 	"time"
 )
 
-func FindDatabase(cli *client.Client) (*types.Container, error) {
+func findDatabase(cli *client.Client, containerName string) (*types.Container, error) {
 	list, err := cli.ContainerList(context.Background(), types.ContainerListOptions{All: true})
 	if err != nil {
 		return nil, err
 	}
 	for _, c := range list {
 		for _, n := range c.Names {
-			if n == "/test-postgres" {
+			if n == containerName {
 				return &c, nil
 			}
 		}
@@ -29,13 +32,13 @@ func FindDatabase(cli *client.Client) (*types.Container, error) {
 	return nil, fmt.Errorf("not found")
 }
 
-type ExecResult struct {
+type execResult struct {
 	StdOut   string
 	StdErr   string
 	ExitCode int
 }
 
-func Exec(cli *client.Client, containerID string, command []string) (types.IDResponse, error) {
+func exec(cli *client.Client, containerID string, command []string) (types.IDResponse, error) {
 	config := types.ExecConfig{
 		AttachStderr: true,
 		AttachStdout: true,
@@ -45,8 +48,8 @@ func Exec(cli *client.Client, containerID string, command []string) (types.IDRes
 	return cli.ContainerExecCreate(context.Background(), containerID, config)
 }
 
-func InspectExecResp(cli *client.Client, id string) (ExecResult, error) {
-	var execResult ExecResult
+func inspectExecResp(cli *client.Client, id string) (execResult, error) {
+	var execResult execResult
 
 	resp, err := cli.ContainerExecAttach(context.Background(), id, types.ExecConfig{})
 	if err != nil {
@@ -90,30 +93,32 @@ func InspectExecResp(cli *client.Client, id string) (ExecResult, error) {
 	return execResult, nil
 }
 
-func StartDatabase(user, pass, databasePrefix string, port int) (*sql.DB, string, error) {
+// StartDatabase - создание базы данных в контейнере с именем containerName. указывается пользователь, пароль,
+// префикс имени базы данных, к которому будет добавлен unix-timestamp в миллисекундах и порт
+func StartDatabase(containerName, user, pass, databasePrefix string, port int) (*sql.DB, string, error) {
 	now := time.Now().UnixNano() / 1e+6
 	c, err := client.NewEnvClient()
 	if err != nil {
 		return nil, "", err
 	}
-	cont, err := FindDatabase(c)
+	cont, err := findDatabase(c, containerName)
 	if err != nil {
 		return nil, "", err
 	}
 
-	d := fmt.Sprintf("%s_%d", databasePrefix, now)
-	logger.Log("creating database", d)
-	id, err := Exec(c, cont.ID, []string{
+	databaseName := fmt.Sprintf("%s_%d", databasePrefix, now)
+	logger.Log("creating database", databaseName)
+	id, err := exec(c, cont.ID, []string{
 		"psql",
 		"-U",
 		"postgres",
 		"-c",
-		fmt.Sprintf("create database %s;", d),
+		fmt.Sprintf("create database %s;", databaseName),
 	})
 	if err != nil {
 		return nil, "", err
 	}
-	res, err := InspectExecResp(c, id.ID)
+	res, err := inspectExecResp(c, id.ID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -122,24 +127,24 @@ func StartDatabase(user, pass, databasePrefix string, port int) (*sql.DB, string
 	if res.ExitCode != 0 {
 		return nil, "", fmt.Errorf("first exec failed: %d", res.ExitCode)
 	}
-	id, err = Exec(c, cont.ID, []string{
+	id, err = exec(c, cont.ID, []string{
 		"psql",
 		"-U",
 		"postgres",
 		"-c",
 		fmt.Sprintf("DO $$\nBEGIN\nCREATE USER %s SUPERUSER PASSWORD '%s';\n"+
 			"EXCEPTION WHEN DUPLICATE_OBJECT THEN\nRAISE NOTICE 'not creating user';\nEND\n$$;\n"+
-			"GRANT ALL PRIVILEGES ON DATABASE %s TO %s;\n", user, pass, d, user),
+			"GRANT ALL PRIVILEGES ON DATABASE %s TO %s;\n", user, pass, databaseName, user),
 	})
 	if err != nil {
-		if err := StopDatabase(d); err != nil {
+		if err := StopDatabase(databaseName, containerName); err != nil {
 			logger.Log("stop after failed start err12: ", err)
 		}
 		return nil, "", err
 	}
-	res, err = InspectExecResp(c, id.ID)
+	res, err = inspectExecResp(c, id.ID)
 	if err != nil {
-		if err := StopDatabase(d); err != nil {
+		if err := StopDatabase(databaseName, containerName); err != nil {
 			logger.Log("stop after failed start err: ", err)
 		}
 		return nil, "", err
@@ -147,23 +152,23 @@ func StartDatabase(user, pass, databasePrefix string, port int) (*sql.DB, string
 	logger.Log("second exec stdout: ", res.StdOut)
 	logger.Log("second exec stderr: ", res.StdErr)
 	if res.ExitCode != 0 {
-		if err := StopDatabase(d); err != nil {
+		if err := StopDatabase(databaseName, containerName); err != nil {
 			logger.Log("stop after failed start err3: ", err)
 		}
 		return nil, "", fmt.Errorf("second exec failed: %d", res.ExitCode)
 	}
 
 	if err := c.Close(); err != nil {
-		if err := StopDatabase(d); err != nil {
+		if err := StopDatabase(databaseName, containerName); err != nil {
 			logger.Log("stop after failed start err4: ", err)
 		}
 		return nil, "", err
 	}
 	connectionString := fmt.Sprintf("host=localhost port=%d user=%s password=%s dbname=%s sslmode=disable",
-		port, user, pass, d)
+		port, user, pass, databaseName)
 	db, err := sql.Open("pgx", connectionString)
 	if err != nil {
-		if err := StopDatabase(d); err != nil {
+		if err := StopDatabase(databaseName, containerName); err != nil {
 			logger.Log("stop after failed start err5: ", err)
 		}
 		return nil, "", err
@@ -181,26 +186,27 @@ func StartDatabase(user, pass, databasePrefix string, port int) (*sql.DB, string
 	}()
 	select {
 	case <-timeout:
-		if err := StopDatabase(d); err != nil {
+		if err := StopDatabase(databaseName, containerName); err != nil {
 			logger.Log("stop after failed start err6: ", err)
 		}
 		return nil, "", fmt.Errorf("ping timeout")
 	case <-success:
 		break
 	}
-	return db, d, nil
+	return db, databaseName, nil
 }
 
-func StopDatabase(d string) error {
+// StopDatabase - удаление базы данных
+func StopDatabase(containerName, d string) error {
 	c, err := client.NewEnvClient()
 	if err != nil {
 		return err
 	}
-	cont, err := FindDatabase(c)
+	cont, err := findDatabase(c, containerName)
 	if err != nil {
 		return err
 	}
-	id, err := Exec(c, cont.ID, []string{
+	id, err := exec(c, cont.ID, []string{
 		"psql",
 		"-U",
 		"postgres",
@@ -210,7 +216,7 @@ func StopDatabase(d string) error {
 	if err != nil {
 		return err
 	}
-	res, err := InspectExecResp(c, id.ID)
+	res, err := inspectExecResp(c, id.ID)
 	if err != nil {
 		return err
 	}

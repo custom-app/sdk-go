@@ -1,3 +1,4 @@
+// Package pool - пакет с реализаций пула публичных и авторизованных соединений
 package pool
 
 import (
@@ -12,6 +13,10 @@ import (
 	"time"
 )
 
+// PrivatePool - пул авторизованных соединений
+//
+// Пул нужен для возможности разрыва соединений и сбора всех сообщений в общую очередь,
+// а также для возможно рассылки сообщений по подписке
 type PrivatePool struct {
 	pools   map[structs.Role]sameRolePool
 	options *opts.ServerPrivateConnOptions
@@ -26,6 +31,8 @@ type sameRolePool struct {
 
 type orderedConn []*conn.ServerPrivateConn
 
+// NewPrivatePool - создание нового пула с опциями. timeout - таймаут общего буфера, queueSize - его размер,
+// roles - список ролей в системе для создания пулов соединений пользователей с одинаковыми ролями
 func NewPrivatePool(options *opts.ServerPrivateConnOptions, roles []structs.Role,
 	timeout time.Duration, queueSize int) (*PrivatePool, error) {
 	if err := opts.FillServerPrivateOptions(options); err != nil {
@@ -43,6 +50,7 @@ func NewPrivatePool(options *opts.ServerPrivateConnOptions, roles []structs.Role
 	return res, nil
 }
 
+// AddConnection - функция добавления соединения в пул
 func (p *PrivatePool) AddConnection(w http.ResponseWriter, r *http.Request) (*conn.ServerPrivateConn, error) {
 	c, err := conn.UpgradePrivateServerConn(&websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
@@ -117,6 +125,7 @@ func (p *PrivatePool) onclose(acc *structs.Account, connId int64) {
 	rolePool.conns[acc.Id] = append(rolePool.conns[acc.Id][:index], rolePool.conns[acc.Id][index+1:]...)
 }
 
+// SendOnSubAll - функция отправки сообщения по подписке
 func (p *PrivatePool) SendOnSubAll(role structs.Role, kind structs.SubKind, id, connId int64, data proto.Message, force bool) {
 	p.pools[role].lock.RLock()
 	for _, set := range p.pools[role].conns {
@@ -134,6 +143,7 @@ func (p *PrivatePool) SendOnSubAll(role structs.Role, kind structs.SubKind, id, 
 	p.pools[role].lock.RUnlock()
 }
 
+// SendOnSubReceivers - функция отправки сообщения по подписке с фильтрацией по id
 func (p *PrivatePool) SendOnSubReceivers(role structs.Role, kind structs.SubKind, id, connId int64, data proto.Message, force bool, receivers []int64) {
 	p.pools[role].lock.RLock()
 	for _, recId := range receivers {
@@ -151,6 +161,7 @@ func (p *PrivatePool) SendOnSubReceivers(role structs.Role, kind structs.SubKind
 	p.pools[role].lock.RUnlock()
 }
 
+// HandleAccountDrop - разрыв всех соединений пользователя
 func (p *PrivatePool) HandleAccountDrop(upd *structs.Account) {
 	logger.Info("handling account drop", upd)
 	p.pools[upd.Role].lock.Lock()
@@ -162,12 +173,9 @@ func (p *PrivatePool) HandleAccountDrop(upd *structs.Account) {
 	}
 }
 
-type SenderInfo struct {
-	Role  structs.Role
-	Id    int64
-	Index int
-}
-
+// HandleResult - функция обработки результата
+//
+// В данном случае - рассылка подписок и разрыв соединений
 func (p *PrivatePool) HandleResult(res structs.Result, acc *structs.Account, connId int64) {
 	for _, s := range res.GetSubs() {
 		if s != nil {
@@ -193,10 +201,12 @@ func (p *PrivatePool) HandleResult(res structs.Result, acc *structs.Account, con
 	}
 }
 
+// GetQueue - получение общего буфера сообщений для их дальнейшей обработки
 func (p *PrivatePool) GetQueue() chan *conn.PrivateMessage {
 	return p.queue
 }
 
+// Close - закрытие всех соединений в пуле и буфера
 func (p *PrivatePool) Close() {
 	for _, v := range p.pools {
 		v.lock.Lock()

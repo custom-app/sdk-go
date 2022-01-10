@@ -1,3 +1,6 @@
+// Package s3 - реализация провайдера работы со статическими файлами с помощью S3-совместимых хранилищ.
+//
+// Подробнее о s3 - https://cloud.yandex.ru/docs/storage/s3/.
 package s3
 
 import (
@@ -21,11 +24,13 @@ var (
 	}
 )
 
+// Provider - структура, имплементирующая интерфейс провайдера
 type Provider struct {
 	bucket string
 	client *minio.Client
 }
 
+// NewProvider - создание провайдера. endpoint - адрес бакета, bucket - имя бакета, keyId - id ключа для доступа, secretKey - секретный ключ для доступа
 func NewProvider(endpoint, bucket, keyId, secretKey string) (*Provider, error) {
 	minioClient, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(keyId, secretKey, ""),
@@ -40,6 +45,7 @@ func NewProvider(endpoint, bucket, keyId, secretKey string) (*Provider, error) {
 	}, nil
 }
 
+// SaveImage - реализация метода SaveImage интерфейса Provider
 func (p *Provider) SaveImage(ctx context.Context, id []int64, imgBytes []byte, sizeGroup []util.SizeGroup, kind string) error {
 	var (
 		img    image.Image
@@ -89,6 +95,7 @@ func (p *Provider) SaveImage(ctx context.Context, id []int64, imgBytes []byte, s
 	return nil
 }
 
+// MoveSet - реализация метода MoveSet интерфейса Provider
 func (p *Provider) MoveSet(ctx context.Context, oldId, newId []int64, qty int64, sizeGroups []util.SizeGroup, kind string) error {
 	for _, g := range sizeGroups {
 		for i := int64(0); i < qty; i++ {
@@ -111,6 +118,7 @@ func (p *Provider) MoveSet(ctx context.Context, oldId, newId []int64, qty int64,
 	return nil
 }
 
+// RemoveMultiple - реализация метода RemoveMultiple интерфейса Provider
 func (p *Provider) RemoveMultiple(ctx context.Context, ids [][]int64, sizeGroup []util.SizeGroup, kind string) error {
 	for _, id := range ids {
 		for _, g := range sizeGroup {
@@ -123,6 +131,7 @@ func (p *Provider) RemoveMultiple(ctx context.Context, ids [][]int64, sizeGroup 
 	return nil
 }
 
+// LoadObject - реализация метода LoadObject интерфейса Provider
 func (p *Provider) LoadObject(ctx context.Context, path string) ([]byte, error) {
 	o, err := p.client.GetObject(ctx, p.bucket, path, minio.GetObjectOptions{})
 	if err != nil {
@@ -138,6 +147,7 @@ func (p *Provider) LoadObject(ctx context.Context, path string) ([]byte, error) 
 	return res, nil
 }
 
+// PutObject - реализация метода PutObject интерфейса Provider
 func (p *Provider) PutObject(ctx context.Context, path string, data []byte, contentType string) error {
 	if _, err := p.client.PutObject(ctx, p.bucket, path,
 		bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
@@ -148,6 +158,7 @@ func (p *Provider) PutObject(ctx context.Context, path string, data []byte, cont
 	return nil
 }
 
+// RemoveObject - реализация метода RemoveObject интерфейса Provider
 func (p *Provider) RemoveObject(ctx context.Context, path string) error {
 	if err := p.client.RemoveObject(ctx, p.bucket, path, minio.RemoveObjectOptions{}); err != nil {
 		return err
@@ -155,6 +166,7 @@ func (p *Provider) RemoveObject(ctx context.Context, path string) error {
 	return nil
 }
 
+// MoveObject - реализация метода MoveObject интерфейса Provider
 func (p *Provider) MoveObject(ctx context.Context, oldPath, newPath string) error {
 	if _, err := p.client.CopyObject(ctx, minio.CopyDestOptions{
 		Bucket: p.bucket,
@@ -171,6 +183,7 @@ func (p *Provider) MoveObject(ctx context.Context, oldPath, newPath string) erro
 	return nil
 }
 
+// SourceName - реализация метода SourceName интерфейса Provider
 func (p *Provider) SourceName() string {
 	return p.bucket
 }

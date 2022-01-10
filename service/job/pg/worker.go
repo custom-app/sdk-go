@@ -14,17 +14,21 @@ const (
 	commitTimeout   = 2 * time.Second
 )
 
+// DatabaseWorker - стандартное действие с транзакцией
 type DatabaseWorker func(ctx context.Context, tx *pg.Transaction) (needCommit bool, res *JobResultErr)
 
+// DatabaseWorkerWithResponse - действие с транзакцией, подразумевающее прото результат
 type DatabaseWorkerWithResponse func(ctx context.Context, tx *pg.Transaction) (
 	needCommit bool, res *JobResultProto)
 
+// DatabaseWorkerWithResult - действие с транзакцией, подразумевающее результат типа structs.Result
 type DatabaseWorkerWithResult func(ctx context.Context, tx *pg.Transaction) (needCommit bool, res structs.Result)
 
+// JobResultErr - результат работы с транзакцией
 type JobResultErr struct {
 	needCommit bool
-	Effects    []func()
-	Err        error
+	Effects    []func() // Эффекты, которые надо применить в случае успеха коммита транзакции
+	Err        error    // Ошибка
 }
 
 func WrapError(err error) *JobResultErr {
@@ -33,10 +37,11 @@ func WrapError(err error) *JobResultErr {
 	}
 }
 
+// JobResultProto - результат работы с транзакцией
 type JobResultProto struct {
 	needCommit bool
-	Effects    []func()
-	Msg        proto.Message
+	Effects    []func()      // Эффекты, которые надо применить в случае успеха коммита транзакции
+	Msg        proto.Message // Прото результат
 }
 
 func WrapMessage(msg proto.Message) *JobResultProto {
@@ -62,6 +67,7 @@ func commitWithTimeout(tx *pg.Transaction, timeout time.Duration) error {
 	return tx.Commit(ctx)
 }
 
+// MakeJob - выполнение работы с транзакцией с таймаутом
 func MakeJob(ctx context.Context, options pgx.TxOptions, worker DatabaseWorker,
 	timeout time.Duration) error {
 	var cancel func()
@@ -104,6 +110,7 @@ func MakeJob(ctx context.Context, options pgx.TxOptions, worker DatabaseWorker,
 	return res
 }
 
+// MakeJobWithResponse - выполнение работы с транзакцией с прото результатом с таймаутом
 func MakeJobWithResponse(ctx context.Context, options pgx.TxOptions, worker DatabaseWorkerWithResponse,
 	timeout time.Duration) (proto.Message, error) {
 	var cancel func()
@@ -145,6 +152,7 @@ func MakeJobWithResponse(ctx context.Context, options pgx.TxOptions, worker Data
 	return res, nil
 }
 
+// MakeJobWithResult - выполнение работы с транзакцией с structs.Result результатом(где подписки и т. д.) с таймаутом
 func MakeJobWithResult(ctx context.Context, options pgx.TxOptions, worker DatabaseWorkerWithResult,
 	timeout time.Duration) (structs.Result, error) {
 	var cancel func()

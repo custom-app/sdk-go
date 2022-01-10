@@ -1,8 +1,12 @@
+// Package multiple - реализация jwt с возможностью нескольких сессий.
+//
+// Примеры использования приведены в пакетах с реализациями интерфейса AuthProvider.
 package multiple
 
 import (
 	"context"
 	"fmt"
+	"github.com/loyal-inform/sdk-go/auth/jwt"
 	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"sync"
@@ -12,21 +16,31 @@ var (
 	providerLock = &sync.RWMutex{}
 )
 
+// AuthProvider - интерфейс провайдера авторизации по jwt
 type AuthProvider interface {
-	Auth(ctx context.Context, token string, purpose structs.Purpose, platform structs.Platform,
+	// Auth - получение аккаунта по логину/паролю
+	Auth(ctx context.Context, token string, purpose jwt.Purpose, platform structs.Platform,
 		versions []string, disabled ...structs.Role) (*structs.Account, int64, error)
-	AuthWithInfo(ctx context.Context, token string, purpose structs.Purpose, platform structs.Platform,
+	// AuthWithInfo - получение аккаунта и полного ответа(полная структура аккаунта,
+	// упакованная в ответ на запрос согласно определению API) на запрос авторизации по jwt-токену
+	AuthWithInfo(ctx context.Context, token string, purpose jwt.Purpose, platform structs.Platform,
 		versions []string, disabled ...structs.Role) (*structs.Account, int64, proto.Message, error)
+	// Logout - удаление токенов
 	Logout(ctx context.Context, role structs.Role, id int64) error
+	// CreateTokens - создание новых токенов для пользователя
 	CreateTokens(ctx context.Context, role structs.Role, id int64) (string, int64, string, int64, error)
+	// ReCreateTokens - создание новых токенов для фиксированной сессии пользователя
 	ReCreateTokens(ctx context.Context, role structs.Role, id, number int64) (string, int64, string, int64, error)
+	// DropTokens - удаление токена
 	DropTokens(ctx context.Context, role structs.Role, id, number int64) error
+	// DropOldTokens - удаление просроченных токенов
 	DropOldTokens(ctx context.Context, timestamp int64) error
 }
 
 var defaultAuth AuthProvider
 
-func Auth(ctx context.Context, token string, purpose structs.Purpose, platform structs.Platform,
+// Auth - вызов метода Auth у провайдера по умолчанию
+func Auth(ctx context.Context, token string, purpose jwt.Purpose, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, int64, error) {
 	providerLock.RLock()
 	defer providerLock.RUnlock()
@@ -36,7 +50,8 @@ func Auth(ctx context.Context, token string, purpose structs.Purpose, platform s
 	return defaultAuth.Auth(ctx, token, purpose, platform, versions, disabled...)
 }
 
-func AuthWithInfo(ctx context.Context, token string, purpose structs.Purpose, platform structs.Platform,
+// AuthWithInfo - вызов метода AuthWithInfo у провайдера по умолчанию
+func AuthWithInfo(ctx context.Context, token string, purpose jwt.Purpose, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, int64, proto.Message, error) {
 	providerLock.RLock()
 	defer providerLock.RUnlock()
@@ -46,36 +61,42 @@ func AuthWithInfo(ctx context.Context, token string, purpose structs.Purpose, pl
 	return defaultAuth.AuthWithInfo(ctx, token, purpose, platform, versions, disabled...)
 }
 
+// Logout - вызов метода Logout у провайдера по умолчанию
 func Logout(ctx context.Context, role structs.Role, id int64) error {
 	providerLock.RLock()
 	defer providerLock.RUnlock()
 	return defaultAuth.Logout(ctx, role, id)
 }
 
+// CreateTokens - вызов метода CreateTokens у провайдера по умолчанию
 func CreateTokens(ctx context.Context, role structs.Role, id int64) (string, int64, string, int64, error) {
 	providerLock.RLock()
 	defer providerLock.RUnlock()
 	return defaultAuth.CreateTokens(ctx, role, id)
 }
 
+// ReCreateTokens - вызов метода ReCreateTokens у провайдера по умолчанию
 func ReCreateTokens(ctx context.Context, role structs.Role, id, number int64) (string, int64, string, int64, error) {
 	providerLock.RLock()
 	defer providerLock.RUnlock()
 	return defaultAuth.ReCreateTokens(ctx, role, id, number)
 }
 
+// DropTokens - вызов метода DropTokens у провайдера по умолчанию
 func DropTokens(ctx context.Context, role structs.Role, id, number int64) error {
 	providerLock.RLock()
 	defer providerLock.RUnlock()
 	return defaultAuth.DropTokens(ctx, role, id, number)
 }
 
+// DropOldTokens - вызов метода DropOldTokens у провайдера по умолчанию
 func DropOldTokens(ctx context.Context, timestamp int64) error {
 	providerLock.RLock()
 	defer providerLock.RUnlock()
 	return defaultAuth.DropOldTokens(ctx, timestamp)
 }
 
+// SetDefaultAuth - установка провайдера по умолчанию
 func SetDefaultAuth(f AuthProvider) {
 	providerLock.Lock()
 	defaultAuth = f

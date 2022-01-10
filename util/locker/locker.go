@@ -1,3 +1,7 @@
+// Package locker - система блокировки с блокировкой по списку чисел.
+//
+// Может использоваться, например, при необходимости упорядочивания действий всех пользователей (пока у user1 работает какая-то операция,
+// user2 тоже может выполнить какую-то операцию, но user1 не может ничего делать до завершения наложившей блокировку операции)
 package locker
 
 import (
@@ -5,6 +9,9 @@ import (
 	"sync"
 )
 
+// LockSystem - система блокировки на основе Mutex.
+//
+// Важно создавать LockSystem с помощью NewLockSystem, чтобы были инициализированы все поля
 type LockSystem struct {
 	m    map[int64]interface{}
 	lock sync.Mutex
@@ -87,6 +94,9 @@ func (s *LockSystem) Unlock(values ...int64) {
 	}
 }
 
+// RWLockSystem - система блокировки на основе RWMutex.
+//
+// Важно создавать RWLockSystem с помощью NewRWLockSystem, чтобы были инициализированы все поля
 type RWLockSystem struct {
 	m    map[int64]interface{}
 	lock sync.Mutex
@@ -228,4 +238,3 @@ func (s *RWLockSystem) RUnlock(values ...int64) {
 		res.(*rwLockSubset).set.Unlock(values[1:]...)
 	}
 }
-

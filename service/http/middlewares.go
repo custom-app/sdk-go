@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/loyal-inform/sdk-go/auth"
 	"github.com/loyal-inform/sdk-go/auth/basic"
+	"github.com/loyal-inform/sdk-go/auth/jwt"
 	"github.com/loyal-inform/sdk-go/auth/jwt/multiple"
 	"github.com/loyal-inform/sdk-go/auth/jwt/single"
 	"github.com/loyal-inform/sdk-go/structs"
@@ -73,18 +74,18 @@ func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...str
 			} else if isToken && accepted.MultipleTokens {
 				if accepted.AuthToken {
 					acc, number, err = multiple.Auth(r.Context(), a[consts.TokenStartInd:],
-						structs.PurposeAccess, platform, versions)
+						jwt.PurposeAccess, platform, versions)
 				} else {
 					acc, number, err = multiple.Auth(r.Context(), a[consts.TokenStartInd:],
-						structs.PurposeRefresh, platform, versions)
+						jwt.PurposeRefresh, platform, versions)
 				}
 			} else if isToken && !accepted.MultipleTokens {
 				if accepted.AuthToken {
 					acc, err = single.Auth(r.Context(), a[consts.TokenStartInd:],
-						structs.PurposeAccess, platform, versions)
+						jwt.PurposeAccess, platform, versions)
 				} else {
 					acc, err = single.Auth(r.Context(), a[consts.TokenStartInd:],
-						structs.PurposeRefresh, platform, versions)
+						jwt.PurposeRefresh, platform, versions)
 				}
 			} else {
 				err = MissingCredentials

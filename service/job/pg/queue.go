@@ -1,3 +1,4 @@
+// Package pg - очереди обработки бд запросов
 package pg
 
 import (
@@ -11,14 +12,16 @@ var (
 	TimeoutErr = errors.New("timeout")
 )
 
+// Task - задача по работы с БД
 type Task struct {
-	Ctx                   context.Context
-	Options               pgx.TxOptions
-	QueueTimeout, Timeout time.Duration
-	Worker                DatabaseWorker
+	Ctx                   context.Context // Контекст
+	Options               pgx.TxOptions   // Опции транзакции
+	QueueTimeout, Timeout time.Duration   // Таймаут попадания в очередь и таймаут транзакции
+	Worker                DatabaseWorker  // Действие с транзакцией
 	returnCh              chan error
 }
 
+// Queue - очередь запросов в БД
 type Queue struct {
 	queue chan *Task
 }
@@ -29,7 +32,7 @@ func NewQueue(size int) *Queue {
 	}
 }
 
-func (q *Queue) AddJob(t *Task) {
+func (q *Queue) addJob(t *Task) {
 	select {
 	case q.queue <- t:
 		return
@@ -46,7 +49,7 @@ func (q *Queue) GetQueue() chan *Task {
 
 func (q *Queue) MakeJob(t *Task) error {
 	t.returnCh = make(chan error)
-	go q.AddJob(t)
+	go q.addJob(t)
 	return <-t.returnCh
 }
 
@@ -54,6 +57,7 @@ func (q *Queue) Close() {
 	close(q.queue)
 }
 
+// Worker - обработчик запроса в БД. Берет запросы из очереди, и запускает выполнение работы
 type Worker struct {
 	queue chan *Task
 }

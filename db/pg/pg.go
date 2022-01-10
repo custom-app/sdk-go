@@ -1,3 +1,10 @@
+// Package pg - пакет для изменения API работы с PostgreSQL.
+//
+// Пакет основан на пакете pgx и pgxpool.
+//
+// В обычном sql нет возможности создать запрос и выполнить его потом, в этом основная задача этого пакета.
+//
+// Бонусом идет потокобезопасность, централизованное логирование ошибок.
 package pg
 
 import (
@@ -11,6 +18,7 @@ import (
 	"time"
 )
 
+// Scannable - интерфейс определяющий источник сканирования данных. Нужен, чтобы можно было писать одну сканирующую функцию для Request и Batch
 type Scannable interface {
 	Query(ctx context.Context) error
 	Scan(...interface{}) error
@@ -18,20 +26,29 @@ type Scannable interface {
 	Close()
 }
 
+// RequestBuilder - интерфейс, определяющий структуру, генерирующую бд-запросы.
+// Нужен, чтобы генерировать запросы не думая о том, через транзакцию это происходит или нет.
+// Deprecated: Не рекомендуется использовать, не удаляется ради обратной совместимости
 type RequestBuilder interface {
 	NewRequest(query string, params ...interface{}) *Request
 }
 
+// TxRequestBuilder - реализация интерфейса RequestBuilder через транзакцию
+// Deprecated: Не рекомендуется использовать, не удаляется ради обратной совместимости
 type TxRequestBuilder struct {
 	tx *Transaction
 }
 
+// NewTxRequestBuilder - создание TxRequestBuilder
+// Deprecated: Не рекомендуется использовать, не удаляется ради обратной совместимости
 func NewTxRequestBuilder(tx *Transaction) *TxRequestBuilder {
 	return &TxRequestBuilder{
 		tx: tx,
 	}
 }
 
+// NewRequestBuilder - создание RequestBuilder, допускающее nil транзакцию
+// Deprecated: Не рекомендуется использовать, не удаляется ради обратной совместимости
 func NewRequestBuilder(tx *Transaction) RequestBuilder {
 	if tx != nil {
 		return NewTxRequestBuilder(tx)
@@ -40,13 +57,19 @@ func NewRequestBuilder(tx *Transaction) RequestBuilder {
 	}
 }
 
+// NewRequest - реализация NewRequest
+// Deprecated: Не рекомендуется использовать, не удаляется ради обратной совместимости
 func (t *TxRequestBuilder) NewRequest(query string, params ...interface{}) *Request {
 	return t.tx.NewRequest(query, params...)
 }
 
+// DefaultRequestBuilder - реализация интерфейса RequestBuilder без транзакции
+// Deprecated: Не рекомендуется использовать, не удаляется ради обратной совместимости
 type DefaultRequestBuilder struct {
 }
 
+// NewRequest - реализация NewRequest
+// Deprecated: Не рекомендуется использовать, не удаляется ради обратной совместимости
 func (d *DefaultRequestBuilder) NewRequest(query string, params ...interface{}) *Request {
 	return NewRequest(query, params...)
 }
@@ -57,11 +80,13 @@ func logError(prefix string, err error) {
 	logger.Info("database err: ", prefix, err)
 }
 
+// Init - инициализация пула соединений
 func Init(url string) (*pgxpool.Pool, error) {
 	if db != nil {
 		return db, nil
 	}
-	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	pool, err := pgxpool.Connect(ctx, url)
 	if err != nil {
 		return nil, err
@@ -71,6 +96,7 @@ func Init(url string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
+// Ping - проверка состояния базы данных
 func Ping() error {
 	if db == nil {
 		logger.Info("ping null db")
@@ -98,6 +124,7 @@ func Ping() error {
 	return nil
 }
 
+// Shutdown - Остановка пула соединений
 func Shutdown() {
 	if db != nil {
 		db.Close()
@@ -105,6 +132,7 @@ func Shutdown() {
 	}
 }
 
+// Request - обертка запроса в базу данных
 type Request struct {
 	errorsCount int
 	query       string
@@ -229,6 +257,7 @@ func (r *Request) Clone() *Request {
 	}
 }
 
+// Batch - обертка группы запросов в бд
 type Batch struct {
 	errorsCount int
 	b           *pgx.Batch
@@ -354,6 +383,7 @@ func (b *Batch) Scan(values ...interface{}) error {
 	return b.err
 }
 
+// Transaction - обертка над бд транзакцией
 type Transaction struct {
 	logPrefix   string
 	tx          pgx.Tx
@@ -395,12 +425,14 @@ func (t *Transaction) Rollback(ctx context.Context) {
 	}
 }
 
+// NewRequest - создание запроса в транзакции
 func (t *Transaction) NewRequest(query string, params ...interface{}) *Request {
 	res := newRequestWithLock(query, t.lock, params...)
 	res.t = t
 	return res
 }
 
+// NewBatch - создание группы запросов в транзакции
 func (t *Transaction) NewBatch() *Batch {
 	res := NewBatch()
 	res.t = t

@@ -1,3 +1,4 @@
+// Package util - вспомогательные типы и функции для работы со статическими файлами
 package util
 
 import (
@@ -8,12 +9,16 @@ import (
 	"path/filepath"
 )
 
-type SizeGroup string
+type SizeGroup string // SizeGroup - группа по размеру максимальной стороны изображения
 
 const (
-	SizeGroupIcons                  = SizeGroup("icons")
-	SizeGroupStatic                 = SizeGroup("static")
-	SizeGroupOriginals              = SizeGroup("originals")
+	// SizeGroupIcons - изображения, сжатые, чтобы максимальная сторона не превышала 600 пикселей
+	SizeGroupIcons = SizeGroup("icons")
+	// SizeGroupStatic - изображения, сжатые, чтобы максимальная сторона не превышала 800 пикселей
+	SizeGroupStatic = SizeGroup("static")
+	// SizeGroupOriginals - оригиналы (может быть применено сжатие jpeg)
+	SizeGroupOriginals = SizeGroup("originals")
+	// SizeGroupNonCompressedOriginals - оригиналы без сжатия
 	SizeGroupNonCompressedOriginals = SizeGroup("origs")
 )
 
@@ -24,6 +29,7 @@ var (
 	}
 )
 
+// ComplexIdToPath - преобразование произвольного идентификатора (состоит из произвольного количества чисел) в путь
 func ComplexIdToPath(id []int64) string {
 	path := make([]string, len(id))
 	for ind, i := range id {
@@ -32,10 +38,12 @@ func ComplexIdToPath(id []int64) string {
 	return filepath.Join(path...)
 }
 
+// GroupSize - размер группы
 func GroupSize(g SizeGroup) uint {
 	return groupSizes[g]
 }
 
+// SplitComplexId - преобразование произвольного идентификатора (состоит из произвольного количества чисел) в директорию и имя файла
 func SplitComplexId(id []int64) (string, int64) {
 	subPath := make([]string, len(id)-1)
 	for ind, i := range id[:len(id)-1] {
@@ -44,6 +52,7 @@ func SplitComplexId(id []int64) (string, int64) {
 	return filepath.Join(subPath...), id[len(id)-1]
 }
 
+// ResizeImage - генерация изображения с новым размером. size - максимальная длина изображения
 func ResizeImage(img image.Image, size uint) image.Image {
 	if size == 0 {
 		return img

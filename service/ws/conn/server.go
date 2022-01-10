@@ -5,6 +5,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/loyal-inform/sdk-go/auth"
 	"github.com/loyal-inform/sdk-go/auth/basic"
+	"github.com/loyal-inform/sdk-go/auth/jwt"
 	"github.com/loyal-inform/sdk-go/auth/jwt/multiple"
 	"github.com/loyal-inform/sdk-go/auth/jwt/single"
 	"github.com/loyal-inform/sdk-go/logger"
@@ -20,6 +21,7 @@ import (
 	"time"
 )
 
+// PublicMessage - сообщение из публичного соединения
 type PublicMessage struct {
 	Conn *ServerPublicConn
 	Data []byte
@@ -62,11 +64,13 @@ func newServerPublicConn(conn *websocket.Conn, options *opts.ServerPublicConnOpt
 	return res, nil
 }
 
+// NewServerPublicConn - создание публичного серверного соединения
 func NewServerPublicConn(conn *websocket.Conn, options *opts.ServerPublicConnOptions,
 	onclose func(int64), reqHeader http.Header) (*ServerPublicConn, error) {
 	return newServerPublicConn(conn, options, onclose, true, reqHeader)
 }
 
+// UpgradePublicServerConn - апгрейд публичного серверного соединения с помощью апгрейд запроса
 func UpgradePublicServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
 	options *opts.ServerPublicConnOptions, onclose func(int64)) (*ServerPublicConn, error) {
 	defer r.Body.Close()
@@ -134,16 +138,19 @@ func (c *ServerPublicConn) listenReceiveWithStop() {
 	}
 }
 
+// ReceiveBuf - получение буфера входящих сообщений
 func (c *ServerPublicConn) ReceiveBuf() chan *PublicMessage {
 	return c.receiveBuf
 }
 
+// SetConnId - изменение id соединения
 func (c *ServerPublicConn) SetConnId(value int64) {
 	c.connIdLock.Lock()
 	c.connId = value
 	c.connIdLock.Unlock()
 }
 
+// HeaderValue - получение значения заголовка запроса апгрейда соединения
 func (c *ServerPublicConn) HeaderValue(key string) string {
 	if c.reqHeader == nil {
 		return ""
@@ -151,6 +158,7 @@ func (c *ServerPublicConn) HeaderValue(key string) string {
 	return c.reqHeader.Get(key)
 }
 
+// ConnId - получение id соединения
 func (c *ServerPublicConn) ConnId() int64 {
 	c.connIdLock.RLock()
 	res := c.connId
@@ -158,6 +166,7 @@ func (c *ServerPublicConn) ConnId() int64 {
 	return res
 }
 
+// Close - закрытие соединения
 func (c *ServerPublicConn) Close() {
 	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
 		c.wg.Wait()
@@ -175,17 +184,19 @@ func (c *ServerPublicConn) close() {
 	}
 }
 
+// AuthRes - результат авторизации
 type AuthRes struct {
 	Resp    proto.Message
 	Account *structs.Account
 }
 
+// PrivateMessage - сообщение из авторизованного серверного соединения
 type PrivateMessage struct {
 	Conn *ServerPrivateConn
 	Data []byte
 }
 
-// ServerPrivateConn - авторизованное соединение с клиентом на стороне сервера
+// ServerPrivateConn - авторизованное серверное соединение с клиентом
 type ServerPrivateConn struct {
 	*ServerPublicConn
 	options    *opts.ServerPrivateConnOptions
@@ -198,6 +209,7 @@ type ServerPrivateConn struct {
 	onauth     func(*ServerPrivateConn)
 }
 
+// NewServerPrivateConn - создание структуры авторизованного серверного соединения с имеющимся установленным WS-соединением
 func NewServerPrivateConn(conn *websocket.Conn, options *opts.ServerPrivateConnOptions,
 	onauth func(*ServerPrivateConn), onclose func(*structs.Account, int64),
 	reqHeader http.Header) (*ServerPrivateConn, error) {
@@ -239,10 +251,10 @@ func privateServerConnViaToken(upgrader *websocket.Upgrader, w http.ResponseWrit
 		err  error
 	)
 	if options.AuthOptions.MultipleTokens {
-		acc, _, resp, err = multiple.AuthWithInfo(r.Context(), a[consts.TokenStartInd:], structs.PurposeAccess,
+		acc, _, resp, err = multiple.AuthWithInfo(r.Context(), a[consts.TokenStartInd:], jwt.PurposeAccess,
 			platform, versions, options.AuthOptions.Disabled...)
 	} else {
-		acc, resp, err = single.AuthWithInfo(r.Context(), a[consts.TokenStartInd:], structs.PurposeAccess,
+		acc, resp, err = single.AuthWithInfo(r.Context(), a[consts.TokenStartInd:], jwt.PurposeAccess,
 			platform, versions, options.AuthOptions.Disabled...)
 	}
 	if err != nil {
@@ -337,6 +349,7 @@ func privateServerConnViaRequest(upgrader *websocket.Upgrader, w http.ResponseWr
 	return res, nil
 }
 
+// UpgradePrivateServerConn - апгрейд авторизованного серверного соединения с помощью апгрейд запроса
 func UpgradePrivateServerConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request,
 	options *opts.ServerPrivateConnOptions, onauth func(*ServerPrivateConn),
 	onclose func(*structs.Account, int64)) (*ServerPrivateConn, error) {
@@ -392,6 +405,8 @@ func (c *ServerPrivateConn) auth() (*AuthRes, error) {
 	}
 }
 
+// AuthConfirm - подтверждение успешной авторизации (вызывается обработчиком очереди сообщений,
+// то есть ответственность за вызов лежит на пользователе SDK)
 func (c *ServerPrivateConn) AuthConfirm(res *AuthRes) {
 	c.authChLock.Lock()
 	if c.authCh != nil {
@@ -437,10 +452,12 @@ func (c *ServerPrivateConn) listenReceiveWithStop() {
 	}
 }
 
+// ReceiveBuf - получение буфера входящих сообщений
 func (c *ServerPrivateConn) ReceiveBuf() chan *PrivateMessage {
 	return c.receiveBuf
 }
 
+// GetAccount - получение аккаунта соединения
 func (c *ServerPrivateConn) GetAccount() *structs.Account {
 	c.accLock.RLock()
 	res := c.account
@@ -448,12 +465,14 @@ func (c *ServerPrivateConn) GetAccount() *structs.Account {
 	return res
 }
 
+// SetAccount - привязка аккаунта к соединению
 func (c *ServerPrivateConn) SetAccount(acc *structs.Account) {
 	c.accLock.Lock()
 	c.account = acc
 	c.accLock.Unlock()
 }
 
+// Close - закрытие соединения
 func (c *ServerPrivateConn) Close() {
 	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
 		c.wg.Wait()

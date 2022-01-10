@@ -13,6 +13,10 @@ import (
 	"time"
 )
 
+// PublicPool - пул публичных соединений
+//
+// Пул нужен для возможности разрыва всех соединений и сбора всех сообщений в общую очередь,
+// а также для возможно рассылки сообщений по подписке
 type PublicPool struct {
 	conns    map[int64]*conn.ServerPublicConn
 	connLock *sync.RWMutex
@@ -21,6 +25,7 @@ type PublicPool struct {
 	timeout  time.Duration
 }
 
+// NewPublicPool - создание нового пула с опциями. timeout - таймаут общего буфера, queueSize - его размер
 func NewPublicPool(options *opts.ServerPublicConnOptions,
 	timeout time.Duration, queueSize int) *PublicPool {
 	res := &PublicPool{
@@ -33,6 +38,7 @@ func NewPublicPool(options *opts.ServerPublicConnOptions,
 	return res
 }
 
+// AddConnection - функция добавления соединения в пул
 func (p *PublicPool) AddConnection(w http.ResponseWriter, r *http.Request) (*conn.ServerPublicConn, error) {
 	p.connLock.Lock()
 	id := time.Now().UnixNano()
@@ -74,6 +80,7 @@ func (p *PublicPool) onclose(connId int64) {
 	p.connLock.Unlock()
 }
 
+// SendOnSubAll - функция отправки сообщения по подписке
 func (p *PublicPool) SendOnSubAll(kind structs.SubKind, data proto.Message) {
 	p.connLock.RLock()
 	for _, c := range p.conns {
@@ -88,6 +95,9 @@ func (p *PublicPool) SendOnSubAll(kind structs.SubKind, data proto.Message) {
 	p.connLock.RUnlock()
 }
 
+// HandleResult - функция обработки результата
+//
+// В данном случае - только рассылка подписок
 func (p *PublicPool) HandleResult(res structs.Result) {
 	for _, s := range res.GetSubs() {
 		if s != nil {
@@ -96,10 +106,12 @@ func (p *PublicPool) HandleResult(res structs.Result) {
 	}
 }
 
+// GetQueue - получение общего буфера сообщений для их дальнейшей обработки
 func (p *PublicPool) GetQueue() chan *conn.PublicMessage {
 	return p.queue
 }
 
+// Close - закрытие всех соединений в пуле и буфера
 func (p *PublicPool) Close() {
 	p.connLock.Lock()
 	for _, c := range p.conns {

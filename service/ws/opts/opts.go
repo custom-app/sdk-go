@@ -1,3 +1,4 @@
+// Package opts - пакет с опциями Websocket соединений
 package opts
 
 import (
@@ -12,15 +13,15 @@ import (
 )
 
 const (
-	defaultReceiveBufSize = 10
-	defaultSendBufSize    = 10
-	defaultBufTimeout     = 10 * time.Second
-	defaultPingPeriod     = time.Second * 45
+	DefaultReceiveBufSize = 10               // Размер входящего буфера по умолчанию
+	DefaultSendBufSize    = 10               // Размер исходящего буфера по умолчанию
+	DefaultBufTimeout     = 10 * time.Second // Таймаут входящего буфера по умолчанию
+	DefaultPingPeriod     = time.Second * 45 // Период пинга по умолчанию
 
-	defaultRetryTimeout = 250 * time.Millisecond
-	defaultRetryLimit   = 20
-	defaultSubTimeout   = 10 * time.Second
-	defaultAuthTimeout  = 10 * time.Second
+	DefaultRetryPeriod = 250 * time.Millisecond // Период попыток переподключения по умолчанию
+	DefaultRetryLimit  = 20                     // Лимит попыток переподключения
+	DefaultSubTimeout  = 10 * time.Second       // Таймаут получения ответа на запрос подписки
+	DefaultAuthTimeout = 10 * time.Second       // Таймаут получения ответа на запрос авторизации
 )
 
 var (
@@ -32,47 +33,57 @@ var (
 	RequiredOptsErr = errors.New("opts required")
 )
 
+// Options - базовые опции websocket-соединения
 type Options struct {
-	ContentType                       string
-	OverflowMsg                       proto.Message
-	OverflowMsgJson, OverflowMsgProto []byte
-	ReceiveBufSize                    int
-	SendBufSize                       int
-	ReceiveBufTimeout, PingPeriod     time.Duration
+	ContentType                       string        // Content Type для соединения. В этом формате будут передаваться сообщения
+	OverflowMsg                       proto.Message // Сообщение о переполнении входящего буфера
+	OverflowMsgJson, OverflowMsgProto []byte        // Сериализованные сообщения о переполнении
+	ReceiveBufSize                    int           // Размер входящего буфера
+	SendBufSize                       int           // Размер исходящего буфера
+	ReceiveBufTimeout                 time.Duration // Таймаут входящего буфера
+	PingPeriod                        time.Duration // Период пинга
 }
 
+// AuthOptions - опции авторизации соединения
 type AuthOptions struct {
+	// Допускается ли авторизация с помощью basic-авторизации, jwt токена и запроса, посланного после инициализации сокета
 	BasicAllowed, TokenAllowed, RequestAllowed bool
-	MultipleTokens                             bool
-	VersionHeader                              string
-	VersionChecker                             http2.VersionChecker
-	Disabled                                   []structs.Role
-	ErrorMapper                                http2.AuthErrorMapper
-	Timeout                                    time.Duration
+	// Какая используется реализация jwt авторизации (один или много токенов на пользователя)
+	MultipleTokens bool
+	VersionHeader  string                // Имя заголовка с версией
+	VersionChecker http2.VersionChecker  // Функция проверки версии
+	Disabled       []structs.Role        // Список ролей, которым запрещено подключение
+	ErrorMapper    http2.AuthErrorMapper // Преобразователь ошибок авторизации в формат API системы
+	Timeout        time.Duration         // Таймаут авторизации по запросу
 }
 
+// ServerPublicConnOptions - опции для публичных соединений. Используется для сервера
 type ServerPublicConnOptions struct {
 	*Options
 }
 
+// ServerPrivateConnOptions - опции для авторизованных соединений. Используется для сервера
 type ServerPrivateConnOptions struct {
 	*ServerPublicConnOptions
 	AuthOptions *AuthOptions
 }
 
+// ClientPublicConnOptions - опции для публичных соединений. Используется для клиентских соединений
 type ClientPublicConnOptions struct {
 	*Options
-	RetryLimit              int
-	RetryPeriod, SubTimeout time.Duration
-	FillVersion             func(http.Header)
-	NeedRestart             bool
+	RetryLimit              int               // Лимит количества попыток переподключения
+	RetryPeriod, SubTimeout time.Duration     // Период попыток переподключения и таймаут ответа на запрос подписки
+	FillVersion             func(http.Header) // Функция заполнения заголовка с версией
+	NeedRestart             bool              // Нужно ли переподключаться в случае разрыва соединения
 }
 
+// ClientPrivateConnOptions - опции для авторизованных соединений. Используется для клиентских соединений
 type ClientPrivateConnOptions struct {
 	*ClientPublicConnOptions
-	AuthTimeout time.Duration
+	AuthTimeout time.Duration // Таймаут ответа на запрос авторизации
 }
 
+// FillOpts - вспомогательная функция заполнения опция значениями по умолчанию
 func FillOpts(opts *Options) error {
 	var err error
 	if opts.OverflowMsgJson == nil {
@@ -88,23 +99,24 @@ func FillOpts(opts *Options) error {
 		}
 	}
 	if opts.ReceiveBufTimeout == 0 {
-		opts.ReceiveBufTimeout = defaultBufTimeout
+		opts.ReceiveBufTimeout = DefaultBufTimeout
 	}
 	if opts.PingPeriod == 0 {
-		opts.PingPeriod = defaultPingPeriod
+		opts.PingPeriod = DefaultPingPeriod
 	}
 	if opts.ContentType == "" {
 		opts.ContentType = consts.ProtoContentType
 	}
 	if opts.ReceiveBufSize == 0 {
-		opts.ReceiveBufSize = defaultReceiveBufSize
+		opts.ReceiveBufSize = DefaultReceiveBufSize
 	}
 	if opts.SendBufSize == 0 {
-		opts.SendBufSize = defaultSendBufSize
+		opts.SendBufSize = DefaultSendBufSize
 	}
 	return nil
 }
 
+// FillServerPublicOptions - вспомогательная функция заполнения опция значениями по умолчанию
 func FillServerPublicOptions(opts *ServerPublicConnOptions) error {
 	if opts.Options == nil {
 		return RequiredOptsErr
@@ -112,6 +124,7 @@ func FillServerPublicOptions(opts *ServerPublicConnOptions) error {
 	return FillOpts(opts.Options)
 }
 
+// FillServerPrivateOptions - вспомогательная функция заполнения опция значениями по умолчанию
 func FillServerPrivateOptions(opts *ServerPrivateConnOptions) error {
 	if opts.ServerPublicConnOptions == nil {
 		return RequiredOptsErr
@@ -119,6 +132,7 @@ func FillServerPrivateOptions(opts *ServerPrivateConnOptions) error {
 	return FillServerPublicOptions(opts.ServerPublicConnOptions)
 }
 
+// FillClientPublicOptions - вспомогательная функция заполнения опция значениями по умолчанию
 func FillClientPublicOptions(opts *ClientPublicConnOptions) error {
 	if opts.Options == nil {
 		return RequiredOptsErr
@@ -127,17 +141,18 @@ func FillClientPublicOptions(opts *ClientPublicConnOptions) error {
 		return err
 	}
 	if opts.RetryLimit == 0 {
-		opts.RetryLimit = defaultRetryLimit
+		opts.RetryLimit = DefaultRetryLimit
 	}
 	if opts.RetryPeriod == 0 {
-		opts.RetryPeriod = defaultRetryTimeout
+		opts.RetryPeriod = DefaultRetryPeriod
 	}
 	if opts.SubTimeout == 0 {
-		opts.SubTimeout = defaultSubTimeout
+		opts.SubTimeout = DefaultSubTimeout
 	}
 	return nil
 }
 
+// FillClientPrivateConnOptions - вспомогательная функция заполнения опция значениями по умолчанию
 func FillClientPrivateConnOptions(opts *ClientPrivateConnOptions) error {
 	if opts.ClientPublicConnOptions == nil {
 		return RequiredOptsErr
@@ -146,7 +161,7 @@ func FillClientPrivateConnOptions(opts *ClientPrivateConnOptions) error {
 		return err
 	}
 	if opts.AuthTimeout == 0 {
-		opts.AuthTimeout = defaultAuthTimeout
+		opts.AuthTimeout = DefaultAuthTimeout
 	}
 	return nil
 }

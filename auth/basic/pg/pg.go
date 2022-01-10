@@ -1,3 +1,4 @@
+// Package pg содержит реализацию basic auth провайдера с использованием базы данных postgresql.
 package pg
 
 import (
@@ -6,7 +7,6 @@ import (
 	"encoding/hex"
 	"github.com/jackc/pgx/v4"
 	"github.com/loyal-inform/sdk-go/auth"
-	pg2 "github.com/loyal-inform/sdk-go/auth/pg"
 	"github.com/loyal-inform/sdk-go/db/pg"
 	pg3 "github.com/loyal-inform/sdk-go/service/job/pg"
 	"github.com/loyal-inform/sdk-go/structs"
@@ -14,19 +14,25 @@ import (
 	"time"
 )
 
+// RoleQuery - sql-команда для получения из бд айди аккаунта по логину и паролю
 type RoleQuery struct {
-	Query string
-	Role  structs.Role
+	Query string       // команда
+	Role  structs.Role // роль для команды
 }
 
+// AuthorizationMaker - структура, имплементирующая интерфейс провайдера
 type AuthorizationMaker struct {
 	roleQueries   []RoleQuery
 	authTimeout   time.Duration
-	accountLoader pg2.AccountLoader
+	accountLoader func(ctx context.Context, tx *pg.Transaction, acc *structs.Account) proto.Message
 	queue         *pg3.Queue
 }
 
-func NewMaker(roleQueries []RoleQuery, queue *pg3.Queue, loader pg2.AccountLoader,
+// NewMaker - создание AuthorizationMaker. roleQueries используется для перебора по логин/паролю, queue - очередь
+// для контроля потока запросов, loader - функция получения полного авторизационного ответа по аккаунту,
+// authTimeout - таймаут одной операции авторизации
+func NewMaker(roleQueries []RoleQuery, queue *pg3.Queue,
+	loader func(ctx context.Context, tx *pg.Transaction, acc *structs.Account) proto.Message,
 	authTimeout time.Duration) *AuthorizationMaker {
 	res := &AuthorizationMaker{
 		roleQueries:   make([]RoleQuery, len(roleQueries)),
@@ -38,6 +44,7 @@ func NewMaker(roleQueries []RoleQuery, queue *pg3.Queue, loader pg2.AccountLoade
 	return res
 }
 
+// Auth - реализация метода Auth интерфейса AuthProvider
 func (m *AuthorizationMaker) Auth(ctx context.Context, login, password string, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, error) {
 	var acc *structs.Account
@@ -60,6 +67,7 @@ func (m *AuthorizationMaker) Auth(ctx context.Context, login, password string, p
 	return acc, nil
 }
 
+// AuthWithTx - вспомогательная функция для авторизации с открытой бд-транзакцией
 func (m *AuthorizationMaker) AuthWithTx(ctx context.Context, tx *pg.Transaction, login, password string,
 	platform structs.Platform, versions []string, disabled ...structs.Role) (*structs.Account, error) {
 	acc, err := m.findUserForLoginPass(ctx, tx, login, password, disabled...)
@@ -70,6 +78,7 @@ func (m *AuthorizationMaker) AuthWithTx(ctx context.Context, tx *pg.Transaction,
 	return acc, nil
 }
 
+// AuthWithInfo - реализация метода AuthWithInfo интерфейса AuthProvider
 func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, login, password string, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, proto.Message, error) {
 	var (
@@ -97,11 +106,12 @@ func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, login, password s
 	return acc, resp, nil
 }
 
+// Logout - реализация метода Logout интерфейса AuthProvider
 func (m *AuthorizationMaker) Logout(ctx context.Context, role structs.Role, id int64) error {
 	return nil
 }
 
-func HashedPassword(password string) (string, error) {
+func hashedPassword(password string) (string, error) {
 	pass, err := hex.DecodeString(password)
 	if err != nil {
 		return "", err
@@ -112,7 +122,7 @@ func HashedPassword(password string) (string, error) {
 
 func (m *AuthorizationMaker) findUserForLoginPass(ctx context.Context, tx *pg.Transaction,
 	login, password string, disabled ...structs.Role) (*structs.Account, error) {
-	pass, err := HashedPassword(password)
+	pass, err := hashedPassword(password)
 	if err != nil {
 		return nil, err
 	}

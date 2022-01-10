@@ -1,3 +1,6 @@
+// Package logger - пакет для логирования.
+//
+// Пока что представлен в виде печати в stderr.
 package logger
 
 import "log"
@@ -48,32 +51,38 @@ func (l *StderrLogger) SetLogLevel(level int) {
 	l.logLevel = level
 }
 
+// Log - сообщение с уровнем приоритета 3
 func Log(msg string, values ...interface{}) {
 	if defaultLogger.LogLevel() >= 3 {
 		defaultLogger.Log(msg, values...)
 	}
 }
 
+// Panic - сообщение с максимальным уровнем приоритета. Будет залогировано при любом значение уровня
 func Panic(msg string, values ...interface{}) {
 	defaultLogger.Panic(msg, values...)
 }
 
+// Info - сообщение с уровнем 3
 func Info(msg string, values ...interface{}) {
 	if defaultLogger.LogLevel() >= 3 {
 		defaultLogger.Info(msg, values...)
 	}
 }
 
+// Debug - сообщение с уровнем 5
 func Debug(msg string, values ...interface{}) {
 	if defaultLogger.LogLevel() >= 5 {
 		defaultLogger.Debug(msg, values...)
 	}
 }
 
+// SetLogger - замена логера по умолчанию
 func SetLogger(logger Logger) {
 	defaultLogger = logger
 }
 
+// SetLogLevel - изменения уровня логирования
 func SetLogLevel(level int) {
 	defaultLogger.SetLogLevel(level)
 }

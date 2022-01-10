@@ -1,3 +1,8 @@
+// Package conn - пакет работы с WebSocket соединениями.
+//
+// Содержит несколько оберток над соединениями, чтобы не дублировать код.
+//
+// Далее под клиентскими соединениями будут пониматься соединения на стороне клиента, а под серверными - соединения на стороне сервера.
 package conn
 
 import (
@@ -28,10 +33,6 @@ var (
 	}
 )
 
-type MessageHandler func(*Conn, *structs.Account, []byte) structs.Result
-
-type Subscriber func(*Conn, structs.SubKind) error
-
 type sendData struct {
 	isPing bool
 	data   []byte
@@ -47,16 +48,17 @@ type SentMessage struct {
 	IsResponse bool
 }
 
+// Conn - базовый тип соединения
 type Conn struct {
 	conn        *websocket.Conn // собственно, соединение
-	options     *opts.Options
-	contentType string
-	isAlive     int32 // счетчик для определения, живо ли соединение
+	options     *opts.Options   // опции
+	contentType string          // content type использованный для создания соединения
+	isAlive     int32           // счетчик для определения, живо ли соединение
 
-	closeLock                *sync.Mutex
-	sendLock                 *sync.Mutex     // мутекс для последовательной обработки отправки/пинга/закрытия
-	wg                       *sync.WaitGroup // processing messages count
-	sendDataLock             *sync.Mutex
+	closeLock                *sync.Mutex           // мутекс для обработки конкурентных попыток закрыть соединение
+	sendLock                 *sync.Mutex           // мутекс для последовательной обработки отправки/пинга/закрытия
+	wg                       *sync.WaitGroup       // processing messages count
+	sendDataLock             *sync.Mutex           // мутекс для последовательной обработки отправки сообщений
 	sendBuf                  chan *SentMessage     // канал сообщений для отправки
 	receiveBuf               chan *ReceivedMessage // канал полученных сообщений
 	sendCloseCh, pingCloseCh chan bool             // каналы для выхода рутин отправки сообщений и пинг-понга
@@ -94,10 +96,12 @@ func newConn(conn *websocket.Conn, options *opts.Options, needStart bool) (*Conn
 	return res, nil
 }
 
+// NewConn - создание структуры соединения из уже установленного WS-соединения
 func NewConn(conn *websocket.Conn, options *opts.Options) (*Conn, error) {
 	return newConn(conn, options, true)
 }
 
+// UpgradeConn - апгрейд соединения с помощью апгрейд запроса
 func UpgradeConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Request, options *opts.Options) (*Conn, error) {
 	defer r.Body.Close()
 	if options == nil {
@@ -111,7 +115,9 @@ func UpgradeConn(upgrader *websocket.Upgrader, w http.ResponseWriter, r *http.Re
 	if err != nil {
 		return nil, err
 	}
-	res.contentType = r.Header.Get(consts.HeaderContentType)
+	if contentType := r.Header.Get(consts.HeaderContentType); contentType != "" {
+		res.contentType = contentType
+	}
 	return res, nil
 }
 
@@ -254,22 +260,19 @@ L:
 	}
 }
 
+// ReceiveBuf - получение буфера входящих сообщений
 func (c *Conn) ReceiveBuf() chan *ReceivedMessage {
 	return c.receiveBuf
 }
 
-func (c *Conn) SendRequest(msg proto.Message) {
+// SendMessage - отправка сообщения
+func (c *Conn) SendMessage(msg proto.Message) {
 	c.SendData(&SentMessage{
 		Data: msg,
 	})
 }
 
-func (c *Conn) SendResponse(msg proto.Message) {
-	c.SendData(&SentMessage{
-		Data: msg,
-	})
-}
-
+// SendData - функция для упорядочивания отправки сообщений
 func (c *Conn) SendData(msg *SentMessage) {
 	c.sendDataLock.Lock()
 	if c.IsAlive() {
@@ -278,10 +281,12 @@ func (c *Conn) SendData(msg *SentMessage) {
 	c.sendDataLock.Unlock()
 }
 
+// IsAlive - проверка состояния соединения
 func (c *Conn) IsAlive() bool {
 	return atomic.LoadInt32(&c.isAlive) == 0
 }
 
+// GetSub - есть ли подписка на топик kind
 func (c *Conn) GetSub(kind structs.SubKind) bool {
 	c.subLock.RLock()
 	res := c.subscriptions[kind]
@@ -289,16 +294,19 @@ func (c *Conn) GetSub(kind structs.SubKind) bool {
 	return res
 }
 
+// SetSub - есть ли подписка на топик kind
 func (c *Conn) SetSub(kind structs.SubKind, value bool) {
 	c.subLock.Lock()
 	c.subscriptions[kind] = value
 	c.subLock.Unlock()
 }
 
+// ContentType - получение Content-Type, с которым было установлено соединение
 func (c *Conn) ContentType() string {
-	return c.options.ContentType
+	return c.contentType
 }
 
+// Close - закрытие соединения
 func (c *Conn) Close() {
 	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
 		c.wg.Wait()

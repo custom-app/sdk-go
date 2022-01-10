@@ -1,41 +1,46 @@
+// Package structs содержит в себе объявления типов, использующихся везде в этом SDK
 package structs
 
 import (
 	"google.golang.org/protobuf/proto"
 )
 
-type Role int32
-type SubKind int32
-type Platform int32
-type Purpose int32
+type Role int32     // enum для роли
+type SubKind int32  // enum для топика подписки
+type Platform int32 // enum для платформы
+type Purpose int32  // Deprecated: используйте тип из пакета go-sdk/auth/jwt
 
 const (
-	PurposeAccess = Purpose(iota)
-	PurposeRefresh
+	PurposeAccess  = Purpose(iota) // Deprecated: используйте константу из пакета go-sdk/auth/jwt
+	PurposeRefresh                 // Deprecated: используйте константу из пакета go-sdk/auth/jwt
 )
 
+// Account - структура содержащая иммутабельную информацию о клиенте
 type Account struct {
-	Id       int64
-	Role     Role
-	Platform Platform
-	Versions []string
+	Id       int64    // id клиента
+	Role     Role     // роль клиента
+	Platform Platform // платформа, с которой выполнен запрос
+	Versions []string // версия системы, с которой выполнен запрос
 }
 
+// SubData - интерфейс, определяющий сообщения для подписки
 type SubData interface {
-	GetKind() SubKind
-	GetData() proto.Message
-	GetAll() map[Role]bool
-	GetForce() bool
-	GetReceivers() map[Role][]int64
+	GetKind() SubKind               // топик подписки
+	GetData() proto.Message         // произвольные данные
+	GetAll() map[Role]bool          // роли пользователей, которым надо послать сообщение без какой-либо фильтрации
+	GetForce() bool                 // Deprecated: использовалось для обратной совместимости
+	GetReceivers() map[Role][]int64 // списки id пользователей, которым надо послать сообщение
 }
 
+// Result - интерфейс, определяющий результат работы произвольного метода
 type Result interface {
-	GetResponse() proto.Message
-	GetSubs() []SubData
-	GetAccountsToDrop() []*Account
-	GetEffects() []func()
+	GetResponse() proto.Message    // ответ на запрос
+	GetSubs() []SubData            // список сообщений по подписке
+	GetAccountsToDrop() []*Account // список аккаунтов, с которыми надо разорвать соединение
+	GetEffects() []func()          // список эффектов, которые должны быть применены в случае успешной обработки результата
 }
 
+// DefaultResult - вспомогательная структура, реализующая интерфейс Result
 type DefaultResult struct {
 	Response       proto.Message
 	Subs           []SubData

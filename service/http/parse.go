@@ -9,6 +9,7 @@ import (
 	"net/http"
 )
 
+// ParseRequest - вспомогательная функция парсинга запроса
 func ParseRequest(r *http.Request, res proto.Message) error {
 	defer r.Body.Close()
 	if r.Header.Get(consts.HeaderContentType) == consts.JsonContentType {
@@ -20,6 +21,7 @@ func ParseRequest(r *http.Request, res proto.Message) error {
 	}
 }
 
+// ParseProtoRequest - функция парсинга запроса с помощью proto
 func ParseProtoRequest(r *http.Request, res proto.Message) error {
 	data, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -32,6 +34,7 @@ func ParseProtoRequest(r *http.Request, res proto.Message) error {
 	return nil
 }
 
+// ParseJsonRequest - функция парсинга запроса с помощью protojson
 func ParseJsonRequest(r *http.Request, res proto.Message) error {
 	defer r.Body.Close()
 	data, err := ioutil.ReadAll(r.Body)

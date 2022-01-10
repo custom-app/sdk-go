@@ -28,12 +28,18 @@ type clientSubData struct {
 	confirm chan bool
 }
 
+// ClientPublicMessage - сообщения, полученные через клиентское публичное соединение
 type ClientPublicMessage struct {
 	Data []byte
 	Conn *ClientPublicConn
 }
 
-// ClientPublicConn - клиентское соединение с сервером без авторизации
+// ClientPublicConn - клиентское соединение с сервером без авторизации.
+//
+// Использовать для клиентских соединений.
+//
+// Процесс восстановления соединения при отключении будет происходить автоматически, если установлены соответствующие
+// опции. Подписки так же будут восстановлены.
 type ClientPublicConn struct {
 	*Conn
 	options         *opts.ClientPublicConnOptions
@@ -93,6 +99,7 @@ func newClientConn(url string, header http.Header, options *opts.ClientPublicCon
 	return res, nil
 }
 
+// NewClientConn - подключение к серверу и создание ClientPublicConn
 func NewClientConn(url string, header http.Header, options *opts.ClientPublicConnOptions) (*ClientPublicConn, error) {
 	if options.FillVersion != nil {
 		options.FillVersion(header)
@@ -106,6 +113,7 @@ func (c *ClientPublicConn) start() {
 	go c.listenSend()
 }
 
+// Sub - подписка на топик kind
 func (c *ClientPublicConn) Sub(kind structs.SubKind, req proto.Message) error {
 	c.subDataLock.Lock()
 	if _, ok := c.subData[kind]; ok {
@@ -134,6 +142,8 @@ func (c *ClientPublicConn) sub(kind structs.SubKind, req proto.Message, confirmC
 	}
 }
 
+// SubConfirm - подтверждение успешного ответа на подписку (вызывается обработчиком очереди сообщений,
+// то есть ответственность за вызов лежит на пользователе SDK)
 func (c *ClientPublicConn) SubConfirm(kind structs.SubKind) error {
 	c.subDataLock.RLock()
 	if v, ok := c.subData[kind]; !ok {
@@ -235,6 +245,11 @@ L:
 	}
 }
 
+// ReceiveBuf - получение буфера входящих сообщений
+func (c *ClientPublicConn) ReceiveBuf() chan *ClientPublicMessage {
+	return c.receiveBuf
+}
+
 func (c *ClientPublicConn) setNeedRestart(value bool) {
 	c.needRestartLock.Lock()
 	c.needRestart = value
@@ -248,6 +263,7 @@ func (c *ClientPublicConn) needRestartSafe() bool {
 	return res
 }
 
+// Close - закрытие соединения
 func (c *ClientPublicConn) Close() {
 	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
 		c.wg.Wait()
@@ -269,11 +285,18 @@ func (c *ClientPublicConn) close() {
 	c.Conn.close()
 }
 
+// ClientPrivateMessage - сообщения, полученные через клиентское авторизованное соединение
 type ClientPrivateMessage struct {
 	Data []byte
 	Conn *ClientPrivateConn
 }
 
+// ClientPrivateConn - клиентское авторизованное соединение с сервером.
+//
+// Использовать для клиентских соединений.
+//
+// Процесс восстановления соединения при отключении будет происходить автоматически, если установлены соответствующие
+// опции. Подписки так же будут восстановлены.
 type ClientPrivateConn struct {
 	*ClientPublicConn
 	options             *opts.ClientPrivateConnOptions
@@ -283,6 +306,7 @@ type ClientPrivateConn struct {
 	receiveBuf          chan *ClientPrivateMessage
 }
 
+// NewClientPrivateConnWithRequest - установка клиентского авторизованного соединения с авторизацией при помощи сообщения-запроса
 func NewClientPrivateConnWithRequest(url string, data proto.Message, options *opts.ClientPrivateConnOptions) (*ClientPrivateConn, error) {
 	if err := opts.FillClientPrivateConnOptions(options); err != nil {
 		return nil, err
@@ -308,6 +332,7 @@ func NewClientPrivateConnWithRequest(url string, data proto.Message, options *op
 	return res, nil
 }
 
+// NewClientPrivateConnWithBasic - установка клиентского авторизованного соединения с авторизацией при помощи basic auth
 func NewClientPrivateConnWithBasic(url, login, pass string, options *opts.ClientPrivateConnOptions) (*ClientPrivateConn, error) {
 	if err := opts.FillClientPrivateConnOptions(options); err != nil {
 		return nil, err
@@ -334,6 +359,7 @@ func NewClientPrivateConnWithBasic(url, login, pass string, options *opts.Client
 	return res, nil
 }
 
+// NewClientPrivateConnWithToken - установка клиентского авторизованного соединения с авторизацией при помощи jwt-авторизации
 func NewClientPrivateConnWithToken(url, token string, options *opts.ClientPrivateConnOptions) (*ClientPrivateConn, error) {
 	if err := opts.FillClientPrivateConnOptions(options); err != nil {
 		return nil, err
@@ -365,6 +391,7 @@ func (c *ClientPrivateConn) start() {
 	go c.listenSend()
 }
 
+// Auth - функция отправки запроса авторизации. Нужна при восстановлении соединения и использовании авторизации с помощью сообщения
 func (c *ClientPrivateConn) Auth() error {
 	if c.authData != nil {
 		c.SendData(&SentMessage{
@@ -379,6 +406,8 @@ func (c *ClientPrivateConn) Auth() error {
 	}
 }
 
+// AuthConfirm - подтверждение успешной авторизации (вызывается обработчиком очереди сообщений,
+// то есть ответственность за вызов лежит на пользователе SDK)
 func (c *ClientPrivateConn) AuthConfirm() error {
 	c.authSuccessChanLock.RLock()
 	c.authSuccessChan <- true
@@ -460,10 +489,12 @@ L:
 	}
 }
 
+// ReceiveBuf - получение буфера входящих сообщений
 func (c *ClientPrivateConn) ReceiveBuf() chan *ClientPrivateMessage {
 	return c.receiveBuf
 }
 
+// Close - закрытие соединения
 func (c *ClientPrivateConn) Close() {
 	if atomic.CompareAndSwapInt32(&c.isAlive, 0, 1) {
 		c.wg.Wait()

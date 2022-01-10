@@ -43,6 +43,7 @@ func (s *Server) handleOtherHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// Server - обертка над http.Server с настройкой базовой маршрутизации запросов
 type Server struct {
 	s       *http.Server
 	handler *mux.Router
@@ -50,6 +51,7 @@ type Server struct {
 	address string
 }
 
+// NewServer - создание сервера
 func NewServer(service Service, address string) (*Server, error) {
 	res := &Server{
 		service: service,
@@ -68,6 +70,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	s.service.HandleConnection(w, r)
 }
 
+// Start - запуск сервера
 func (s *Server) Start() error {
 	s.s = &http.Server{Addr: s.address, Handler: s.handler}
 	if err := s.service.Start(); err != nil {
@@ -79,6 +82,7 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// Stop - остановка сервера
 func (s *Server) Stop() error {
 	if err := s.s.Shutdown(context.Background()); err != nil {
 		return err

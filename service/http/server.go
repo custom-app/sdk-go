@@ -9,6 +9,9 @@ import (
 	"net/http"
 )
 
+// Server - обертка надо http.Server с настройкой маршрутизации запросов
+//
+// Для привязки обработчиков будет использован не корневой роутер, а роутер с префиксом consts.ApiPrefix
 type Server struct {
 	s       *http.Server
 	service Service
@@ -16,6 +19,7 @@ type Server struct {
 	address string
 }
 
+// NewServer - создание сервера
 func NewServer(service Service, address string) (*Server, error) {
 	router := mux.NewRouter()
 	res := &Server{
@@ -63,6 +67,7 @@ func (s *Server) handleOtherHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+// Start - запуск сервера
 func (s *Server) Start() error {
 	s.s = &http.Server{Addr: s.address, Handler: s.router}
 	if err := s.service.Start(); err != nil {
@@ -77,6 +82,7 @@ func (s *Server) Start() error {
 	return nil
 }
 
+// Stop - остановка сервера
 func (s *Server) Stop() error {
 	if err := s.s.Shutdown(context.Background()); err != nil {
 		return err

@@ -1,4 +1,5 @@
-package job
+// Package http - реализация очереди http-запросов с обработкой переполнения
+package http
 
 import (
 	"errors"
@@ -24,27 +25,30 @@ const (
 	defaultQueueSize  = 4
 )
 
-type HttpJob struct {
+// Job - таск по обработке http запроса
+type Job struct {
 	W       http.ResponseWriter
 	R       *http.Request
 	Handler http.Handler
-	resCh chan bool
+	resCh   chan bool
 }
 
-type HttpQueueOptions struct {
-	QueueSize                         int
-	Timeout                           time.Duration
-	OverflowCode                      int
-	OverflowMsg                       proto.Message
-	OverflowMsgProto, OverflowMsgJson []byte
+// QueueOptions - опции очереди
+type QueueOptions struct {
+	QueueSize                         int           // Размер очереди
+	Timeout                           time.Duration // Таймаут добавления в очередь
+	OverflowCode                      int           // Статус код ошибки переполнения очереди
+	OverflowMsg                       proto.Message // Сообщение о переполнении
+	OverflowMsgProto, OverflowMsgJson []byte        // Сериализованное сообщение о переполнении
 }
 
-type HttpQueue struct {
-	ch   chan *HttpJob
-	opts *HttpQueueOptions
+// Queue - очередь http-запросов
+type Queue struct {
+	ch   chan *Job
+	opts *QueueOptions
 }
 
-func fillOpts(opts *HttpQueueOptions) error {
+func fillOpts(opts *QueueOptions) error {
 	var err error
 	if opts.OverflowMsgJson == nil {
 		opts.OverflowMsgJson, err = marshaler.Marshal(opts.OverflowMsg)
@@ -70,21 +74,21 @@ func fillOpts(opts *HttpQueueOptions) error {
 	return nil
 }
 
-func NewQueue(opts *HttpQueueOptions) (*HttpQueue, error) {
+func NewQueue(opts *QueueOptions) (*Queue, error) {
 	if opts == nil {
 		return nil, OptsRequiredErr
 	}
 	if err := fillOpts(opts); err != nil {
 		return nil, err
 	}
-	res := &HttpQueue{
-		ch:   make(chan *HttpJob, opts.QueueSize),
+	res := &Queue{
+		ch:   make(chan *Job, opts.QueueSize),
 		opts: opts,
 	}
 	return res, nil
 }
 
-func (q *HttpQueue) AddJob(job *HttpJob) {
+func (q *Queue) AddJob(job *Job) {
 	select {
 	case q.ch <- job:
 		break
@@ -97,20 +101,21 @@ func (q *HttpQueue) AddJob(job *HttpJob) {
 	}
 }
 
-func (q *HttpQueue) Handler(handler http.Handler) http.Handler {
+// Handler - получение функции для использования в качестве Middleware при настройке маршрутизации запросов
+func (q *Queue) Handler(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resCh := make(chan bool)
-		q.AddJob(&HttpJob{
+		q.AddJob(&Job{
 			W:       w,
 			R:       r,
 			Handler: handler,
-			resCh: resCh,
+			resCh:   resCh,
 		})
-		<- resCh
+		<-resCh
 	})
 }
 
-func (q *HttpQueue) sendOverflow(job *HttpJob) {
+func (q *Queue) sendOverflow(job *Job) {
 	if job.R.Header.Get(consts.HeaderContentType) == consts.JsonContentType {
 		http2.SendBytes(job.W, q.opts.OverflowCode, q.opts.OverflowMsgJson)
 	} else {
@@ -119,10 +124,10 @@ func (q *HttpQueue) sendOverflow(job *HttpJob) {
 	job.resCh <- true
 }
 
-func (q *HttpQueue) GetQueue() chan *HttpJob {
+func (q *Queue) GetQueue() chan *Job {
 	return q.ch
 }
 
-func (q *HttpQueue) Close() {
+func (q *Queue) Close() {
 	close(q.ch)
 }

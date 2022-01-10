@@ -1,3 +1,13 @@
+// Package pg содержит реализацию jwt провайдера с одним единовременным токеном с использованием базы данных postgresql.
+//
+// Для работы с пакетом токены должны храниться в таблицах такого вида:
+//
+//     Column   |     Type      | Collation | Nullable | Default
+//  ------------+---------------+-----------+----------+---------
+//   id         | bigint        |           | not null |
+//   purpose    | integer       |           | not null |
+//   secret     | character(64) |           | not null |
+//   expires_at | bigint        |           | not null |
 package pg
 
 import (
@@ -9,7 +19,6 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/loyal-inform/sdk-go/auth"
 	jwt2 "github.com/loyal-inform/sdk-go/auth/jwt"
-	pg2 "github.com/loyal-inform/sdk-go/auth/pg"
 	"github.com/loyal-inform/sdk-go/db/pg"
 	pg3 "github.com/loyal-inform/sdk-go/service/job/pg"
 	"github.com/loyal-inform/sdk-go/structs"
@@ -37,16 +46,22 @@ func randomString(l int) string {
 	return string(res)
 }
 
+// AuthorizationMaker - структура, имплементирующая интерфейс провайдера
 type AuthorizationMaker struct {
 	tokenTables                                          map[structs.Role]string
 	lockers                                              map[structs.Role]*locker.LockSystem
 	key                                                  string
 	queue                                                *pg3.Queue
 	accessTokenTimeout, refreshTokenTimeout, authTimeout time.Duration
-	accountLoader                                        pg2.AccountLoader
+	accountLoader                                        func(ctx context.Context, tx *pg.Transaction, acc *structs.Account) proto.Message
 }
 
-func NewMaker(tokenTables map[structs.Role]string, key string, queue *pg3.Queue, loader pg2.AccountLoader,
+// NewMaker - создание AuthorizationMaker. tokenTables - названия таблиц с токенами, key - секретный ключ,
+// queue - очередь для контроля потока запросов, loader - функция получения полного авторизационного ответа по аккаунту,
+// accessTokenTimeout - время жизни access токена, refreshTokenTimeout - время жизни refresh токена,
+// authTimeout - таймаут одной операции авторизации
+func NewMaker(tokenTables map[structs.Role]string, key string, queue *pg3.Queue,
+	loader func(ctx context.Context, tx *pg.Transaction, acc *structs.Account) proto.Message,
 	accessTokenTimeout, refreshTokenTimeout, authTimeout time.Duration) *AuthorizationMaker {
 	res := &AuthorizationMaker{
 		lockers:             make(map[structs.Role]*locker.LockSystem, len(tokenTables)),
@@ -65,7 +80,8 @@ func NewMaker(tokenTables map[structs.Role]string, key string, queue *pg3.Queue,
 	return res
 }
 
-func (m *AuthorizationMaker) Auth(ctx context.Context, token string, purpose structs.Purpose,
+// Auth - реализация метода Auth интерфейса AuthProvider
+func (m *AuthorizationMaker) Auth(ctx context.Context, token string, purpose jwt2.Purpose,
 	platform structs.Platform, versions []string, disabled ...structs.Role) (*structs.Account, error) {
 	t, err := m.parseToken(token)
 	if err != nil {
@@ -96,7 +112,8 @@ func (m *AuthorizationMaker) Auth(ctx context.Context, token string, purpose str
 	return acc, nil
 }
 
-func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, token string, purpose structs.Purpose, platform structs.Platform,
+// AuthWithInfo - реализация метода AuthWithInfo интерфейса AuthProvider
+func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, token string, purpose jwt2.Purpose, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, proto.Message, error) {
 	t, err := m.parseToken(token)
 	if err != nil {
@@ -131,6 +148,7 @@ func (m *AuthorizationMaker) AuthWithInfo(ctx context.Context, token string, pur
 	return acc, resp, nil
 }
 
+// Logout - реализация метода Logout интерфейса AuthProvider
 func (m *AuthorizationMaker) Logout(ctx context.Context, role structs.Role, id int64) error {
 	return m.queue.MakeJob(&pg3.Task{
 		Ctx:          ctx,
@@ -138,10 +156,10 @@ func (m *AuthorizationMaker) Logout(ctx context.Context, role structs.Role, id i
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
 		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, *pg3.JobResultErr) {
-			if err := m.dropToken(ctx, tx, role, id, structs.PurposeAccess); err != nil {
+			if err := m.dropToken(ctx, tx, role, id, jwt2.PurposeAccess); err != nil {
 				return false, pg3.WrapError(err)
 			}
-			if err := m.dropToken(ctx, tx, role, id, structs.PurposeRefresh); err != nil {
+			if err := m.dropToken(ctx, tx, role, id, jwt2.PurposeRefresh); err != nil {
 				return false, pg3.WrapError(err)
 			}
 			return true, nil
@@ -162,7 +180,7 @@ func (m *AuthorizationMaker) parseToken(token string) (*jwt.Token, error) {
 	return res, nil
 }
 
-func (m *AuthorizationMaker) checkToken(ctx context.Context, tx *pg.Transaction, token *jwt.Token, purpose structs.Purpose) (*structs.Account, error) {
+func (m *AuthorizationMaker) checkToken(ctx context.Context, tx *pg.Transaction, token *jwt.Token, purpose jwt2.Purpose) (*structs.Account, error) {
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil, jwt2.ParseTokenErr
@@ -172,7 +190,7 @@ func (m *AuthorizationMaker) checkToken(ctx context.Context, tx *pg.Transaction,
 	}
 	if realPurpose, ok := claims["purpose"].(float64); !ok {
 		return nil, jwt2.InvalidTokenErr
-	} else if structs.Purpose(realPurpose) != purpose {
+	} else if jwt2.Purpose(realPurpose) != purpose {
 		return nil, jwt2.InvalidTokenPurposeErr
 	}
 	if !token.Valid {
@@ -219,7 +237,7 @@ func parseTokenStringClaim(claims jwt.MapClaims, key string) (string, error) {
 }
 
 func (m *AuthorizationMaker) checkSecret(ctx context.Context, tx *pg.Transaction,
-	role structs.Role, id int64, purpose structs.Purpose, secret string) error {
+	role structs.Role, id int64, purpose jwt2.Purpose, secret string) error {
 	checkReq := tx.NewRequest(fmt.Sprintf("select 1 from %s where id=$1 and purpose=$2 and secret=$3",
 		m.tokenTables[role]), id, purpose, secret)
 	if err := checkReq.Query(ctx); err != nil {
@@ -232,7 +250,7 @@ func (m *AuthorizationMaker) checkSecret(ctx context.Context, tx *pg.Transaction
 	return nil
 }
 
-func GenerateSecret(role structs.Role, id int64, purpose structs.Purpose) string {
+func generateSecret(role structs.Role, id int64, purpose jwt2.Purpose) string {
 	toHashElems := []string{
 		fmt.Sprintf("%d", role),
 		fmt.Sprintf("%d", id),
@@ -246,7 +264,7 @@ func GenerateSecret(role structs.Role, id int64, purpose structs.Purpose) string
 }
 
 func (m *AuthorizationMaker) setSecret(ctx context.Context, tx *pg.Transaction, role structs.Role,
-	id int64, purpose structs.Purpose, secret string, expires time.Time) error {
+	id int64, purpose jwt2.Purpose, secret string, expires time.Time) error {
 	if err := m.dropToken(ctx, tx, role, id, purpose); err != nil {
 		return err
 	}
@@ -259,8 +277,8 @@ func (m *AuthorizationMaker) setSecret(ctx context.Context, tx *pg.Transaction, 
 }
 
 func (m *AuthorizationMaker) createToken(ctx context.Context, tx *pg.Transaction, role structs.Role, id int64,
-	purpose structs.Purpose, expire time.Time) (string, error) {
-	secret := GenerateSecret(role, id, purpose)
+	purpose jwt2.Purpose, expire time.Time) (string, error) {
+	secret := generateSecret(role, id, purpose)
 	if e := m.setSecret(ctx, tx, role, id, purpose, secret, expire); e != nil {
 		return "", e
 	}
@@ -279,6 +297,7 @@ func (m *AuthorizationMaker) createToken(ctx context.Context, tx *pg.Transaction
 	return res, nil
 }
 
+// CreateTokens - реализация метода CreateTokens интерфейса AuthProvider
 func (m *AuthorizationMaker) CreateTokens(ctx context.Context, role structs.Role, id int64) (
 	accessToken string, accessExpires int64, refreshToken string, refreshExpires int64, err error) {
 	if err := m.queue.MakeJob(&pg3.Task{
@@ -301,6 +320,7 @@ func (m *AuthorizationMaker) CreateTokens(ctx context.Context, role structs.Role
 	return
 }
 
+// CreateTokensWithTx - вспомогательная функция создания токенов с открытой бд-транзакцией
 func (m *AuthorizationMaker) CreateTokensWithTx(ctx context.Context, tx *pg.Transaction, role structs.Role,
 	id int64) (accessToken string, accessExpires int64, refreshToken string, refreshExpires int64, err error) {
 	m.lockers[role].Lock(id)
@@ -316,11 +336,11 @@ func (m *AuthorizationMaker) createTokens(ctx context.Context, tx *pg.Transactio
 	id int64) (string, int64, string, int64, error) {
 	now := time.Now()
 	accessExpiresAt, refreshExpiresAt := now.Add(m.accessTokenTimeout), now.Add(m.refreshTokenTimeout)
-	accessToken, e := m.createToken(ctx, tx, role, id, structs.PurposeAccess, accessExpiresAt)
+	accessToken, e := m.createToken(ctx, tx, role, id, jwt2.PurposeAccess, accessExpiresAt)
 	if e != nil {
 		return "", 0, "", 0, e
 	}
-	refreshToken, e := m.createToken(ctx, tx, role, id, structs.PurposeRefresh, refreshExpiresAt)
+	refreshToken, e := m.createToken(ctx, tx, role, id, jwt2.PurposeRefresh, refreshExpiresAt)
 	if e != nil {
 		return "", 0, "", 0, e
 	}
@@ -328,7 +348,7 @@ func (m *AuthorizationMaker) createTokens(ctx context.Context, tx *pg.Transactio
 }
 
 func (m *AuthorizationMaker) dropToken(ctx context.Context, tx *pg.Transaction,
-	role structs.Role, id int64, purpose structs.Purpose) error {
+	role structs.Role, id int64, purpose jwt2.Purpose) error {
 	dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where id=$1 and purpose=$2", m.tokenTables[role]), id, purpose)
 	if err := dropReq.Exec(ctx); err != nil {
 		return err
@@ -336,6 +356,7 @@ func (m *AuthorizationMaker) dropToken(ctx context.Context, tx *pg.Transaction,
 	return nil
 }
 
+// DropOldTokens - функция удаления устаревших токенов
 func (m *AuthorizationMaker) DropOldTokens(ctx context.Context, timestamp int64) error {
 	return m.queue.MakeJob(&pg3.Task{
 		Ctx:          ctx,
@@ -346,7 +367,7 @@ func (m *AuthorizationMaker) DropOldTokens(ctx context.Context, timestamp int64)
 			for _, v := range m.tokenTables {
 				dropReq := tx.NewRequest(fmt.Sprintf("delete from %s where number in "+
 					"(select number from %s where purpose=$1 and expires_at<=$2)", v, v),
-					structs.PurposeRefresh, timestamp)
+					jwt2.PurposeRefresh, timestamp)
 				if err := dropReq.Exec(ctx); err != nil {
 					return false, pg3.WrapError(err)
 				}
