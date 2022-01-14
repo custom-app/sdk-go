@@ -1,0 +1,16 @@
+name: MASTER CI
+on:
+  push:
+    branches:
+      - "master"
+jobs:
+  update:
+    runs-on: [self-hosted, master]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Update docs
+        run: docker-compose up -d
+      - name: Push nginx config
+        run: cp docs/docs.conf /etc/nginx/conf.d
+      - name: Restart nginx
+        run: nginx -s restart
