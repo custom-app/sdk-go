@@ -13,4 +13,4 @@ jobs:
       - name: Push nginx config
         run: cp docs/docs.conf /etc/nginx/conf.d
       - name: Restart nginx
-        run: nginx -s restart
+        run: nginx -s reload
