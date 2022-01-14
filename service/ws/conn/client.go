@@ -434,7 +434,7 @@ func (c *ClientPrivateConn) restart() {
 			if err := c.conn.Close(); err != nil {
 				logger.Info("restart close after auth failed err", err)
 			}
-			continue
+			break // listenReceive сделает еще один вызов рестарта
 		}
 		c.restartSubs()
 		break
