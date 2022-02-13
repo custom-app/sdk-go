@@ -16,5 +16,6 @@ require (
 	github.com/minio/minio-go/v7 v7.0.12
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
 	github.com/opencontainers/go-digest v1.0.0 // indirect
+	go.mongodb.org/mongo-driver v1.8.3 // indirect
 	google.golang.org/protobuf v1.25.0
 )
