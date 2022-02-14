@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"time"
 )
 
@@ -13,10 +14,11 @@ var (
 
 // Task - задача по работе с БД
 type Task struct {
-	Ctx                   context.Context // Контекст
-	Session               mongo.Session   // Сессия
-	QueueTimeout, Timeout time.Duration   // Таймаут попадания в очередь и таймаут транзакции
-	Worker                DatabaseWorker  // Действие с транзакцией
+	Ctx                   context.Context            // Контекст
+	Options               options.TransactionOptions // опции транзакции
+	Session               mongo.Session              // Сессия
+	QueueTimeout, Timeout time.Duration              // Таймаут попадания в очередь и таймаут транзакции
+	Worker                DatabaseWorker             // Действие с транзакцией
 	returnCh              chan error
 }
 
@@ -69,6 +71,6 @@ func NewWorker(queue chan *Task) *Worker {
 
 func (w *Worker) Run() {
 	for t := range w.queue {
-		t.returnCh <- MakeJob(t.Ctx, t.Worker, t.Timeout)
+		t.returnCh <- MakeJob(t.Ctx, &t.Options, t.Worker, t.Timeout)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/loyal-inform/sdk-go/db/mongo"
 	"github.com/loyal-inform/sdk-go/structs"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"google.golang.org/protobuf/proto"
 	"time"
 )
@@ -67,12 +68,12 @@ func commitWithTimeout(tx *mongo.Transaction, timeout time.Duration) error {
 }
 
 // MakeJob - выполнение работы с транзакцией с таймаутом
-func MakeJob(ctx context.Context, worker DatabaseWorker,
+func MakeJob(ctx context.Context, opt *options.TransactionOptions, worker DatabaseWorker,
 	timeout time.Duration) error {
 	var cancel func()
 	ctx, cancel = context.WithTimeout(ctx, timeout)
 	defer cancel()
-	tx, err := mongo.NewTransaction(ctx)
+	tx, err := mongo.NewTransaction(ctx, opt)
 	if err != nil {
 		return err
 	}
@@ -110,12 +111,12 @@ func MakeJob(ctx context.Context, worker DatabaseWorker,
 }
 
 // MakeJobWithResponse - выполнение работы с транзакцией с прото результатом с таймаутом
-func MakeJobWithResponse(ctx context.Context, worker DatabaseWorkerWithResponse,
+func MakeJobWithResponse(ctx context.Context, opt *options.TransactionOptions, worker DatabaseWorkerWithResponse,
 	timeout time.Duration) (proto.Message, error) {
 	var cancel func()
 	ctx, cancel = context.WithTimeout(ctx, timeout)
 	defer cancel()
-	tx, err := mongo.NewTransaction(ctx)
+	tx, err := mongo.NewTransaction(ctx, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -152,12 +153,12 @@ func MakeJobWithResponse(ctx context.Context, worker DatabaseWorkerWithResponse,
 }
 
 // MakeJobWithResult - выполнение работы с транзакцией с structs.Result результатом(где подписки и т. д.) с таймаутом
-func MakeJobWithResult(ctx context.Context, worker DatabaseWorkerWithResult,
+func MakeJobWithResult(ctx context.Context, opt *options.TransactionOptions, worker DatabaseWorkerWithResult,
 	timeout time.Duration) (structs.Result, error) {
 	var cancel func()
 	ctx, cancel = context.WithTimeout(ctx, timeout)
 	defer cancel()
-	tx, err := mongo.NewTransaction(ctx)
+	tx, err := mongo.NewTransaction(ctx, opt)
 	if err != nil {
 		return nil, err
 	}

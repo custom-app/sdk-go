@@ -22,11 +22,6 @@ func Init(url string) (*mongo.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err = client.Disconnect(ctx); err != nil {
-			panic(err)
-		}
-	}()
 	db = client
 	return client, nil
 }
@@ -41,6 +36,26 @@ func Shutdown(ctx context.Context) {
 	}
 }
 
+// Request - обертка над запросом в бд
+type Request struct {
+	collection mongo.Collection
+	params     []interface{}
+	trans      *Transaction
+	lock       *sync.Mutex
+}
+
+func NewRequest(collection mongo.Collection, params ...interface{}) *Request {
+	return newRequestWithLock(collection, &sync.Mutex{}, params)
+}
+
+func newRequestWithLock(collection mongo.Collection, lock *sync.Mutex, params ...interface{}) *Request {
+	return &Request{
+		collection: collection,
+		params:     params,
+		lock:       lock,
+	}
+}
+
 // Transaction - обертка над бд транзакцией mongodb
 type Transaction struct {
 	logPrefix   string
@@ -50,13 +65,13 @@ type Transaction struct {
 	lock        *sync.Mutex
 }
 
-func NewTransaction(ctx context.Context) (*Transaction, error) {
+func NewTransaction(ctx context.Context, opt *options.TransactionOptions) (*Transaction, error) {
 	sess, err := db.StartSession()
 	if err != nil {
 		return nil, err
 	}
 	defer sess.EndSession(ctx)
-	if err := sess.StartTransaction(); err != nil {
+	if err := sess.StartTransaction(opt); err != nil {
 		logError("begin tx", err)
 		return nil, err
 	}
@@ -85,6 +100,13 @@ func (t *Transaction) Abort(ctx context.Context) {
 			logError("rollback tx", err)
 		}
 	}
+}
+
+// NewRequest - создание запроса в транзакции
+func (t *Transaction) NewRequest(collection mongo.Collection, params ...interface{}) *Request {
+	res := newRequestWithLock(collection, t.lock, params)
+	res.trans = t
+	return res
 }
 
 func logError(s string, err error) {
