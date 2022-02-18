@@ -1,15 +1,33 @@
-// Package multiple - реализация jwt с возможностью нескольких сессий.
+// Package jwt - реализация jwt с возможностью нескольких сессий.
+//
+// Также пакет содержит общие ошибки и структуры для авторизации с помощью jwt.
+//
+// О том, как работает jwt - https://habr.com/ru/post/340146/.
 //
 // Примеры использования приведены в пакетах с реализациями интерфейса AuthProvider.
-package multiple
+package jwt
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/loyal-inform/sdk-go/auth/jwt"
 	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"sync"
+)
+
+type Purpose int32 // enum для типа jwt-токена
+
+const (
+	PurposeAccess  = Purpose(iota) // access токен
+	PurposeRefresh                 // refresh токен
+)
+
+var (
+	ParseTokenErr          = errors.New("parse token failed")    // ParseTokenErr - не удалось распарсить токен
+	ExpiredTokenErr        = errors.New("expired token")         // ExpiredTokenErr - токен просрочен
+	InvalidTokenPurposeErr = errors.New("invalid token purpose") // InvalidTokenPurposeErr - некорректный purpose у токена
+	InvalidTokenErr        = errors.New("invalid token")         // InvalidTokenErr - не удалось распарсить один из claim'ов токена
 )
 
 var (
@@ -19,11 +37,11 @@ var (
 // AuthProvider - интерфейс провайдера авторизации по jwt
 type AuthProvider interface {
 	// Auth - получение аккаунта по логину/паролю
-	Auth(ctx context.Context, token string, purpose jwt.Purpose, platform structs.Platform,
+	Auth(ctx context.Context, token string, purpose Purpose, platform structs.Platform,
 		versions []string, disabled ...structs.Role) (*structs.Account, int64, error)
 	// AuthWithInfo - получение аккаунта и полного ответа(полная структура аккаунта,
 	// упакованная в ответ на запрос согласно определению API) на запрос авторизации по jwt-токену
-	AuthWithInfo(ctx context.Context, token string, purpose jwt.Purpose, platform structs.Platform,
+	AuthWithInfo(ctx context.Context, token string, purpose Purpose, platform structs.Platform,
 		versions []string, disabled ...structs.Role) (*structs.Account, int64, proto.Message, error)
 	// Logout - удаление токенов
 	Logout(ctx context.Context, role structs.Role, id int64) error
@@ -40,7 +58,7 @@ type AuthProvider interface {
 var defaultAuth AuthProvider
 
 // Auth - вызов метода Auth у провайдера по умолчанию
-func Auth(ctx context.Context, token string, purpose jwt.Purpose, platform structs.Platform,
+func Auth(ctx context.Context, token string, purpose Purpose, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, int64, error) {
 	providerLock.RLock()
 	defer providerLock.RUnlock()
@@ -51,7 +69,7 @@ func Auth(ctx context.Context, token string, purpose jwt.Purpose, platform struc
 }
 
 // AuthWithInfo - вызов метода AuthWithInfo у провайдера по умолчанию
-func AuthWithInfo(ctx context.Context, token string, purpose jwt.Purpose, platform structs.Platform,
+func AuthWithInfo(ctx context.Context, token string, purpose Purpose, platform structs.Platform,
 	versions []string, disabled ...structs.Role) (*structs.Account, int64, proto.Message, error) {
 	providerLock.RLock()
 	defer providerLock.RUnlock()
