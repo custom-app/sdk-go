@@ -13,23 +13,25 @@ import (
 )
 
 var (
-	AddressRequiredErr     = errors.New("address required")
-	ConnIndexOutOfRangeErr = errors.New("conn ind out of range")
-	UnhandledMessageErr    = errors.New("unhandled message")
+	AddressRequiredErr     = errors.New("address required")      // AddressRequiredErr - пустой адрес
+	ConnIndexOutOfRangeErr = errors.New("conn ind out of range") // ConnIndexOutOfRangeErr - в клиенте нет соединения с таким индексом
+	UnhandledMessageErr    = errors.New("unhandled message")     // UnhandledMessageErr - для какого-то из сообщений не нашлось обработчика
 )
 
+// WsMessageKind - вспомогательный тип для определения типа сообщения
 type WsMessageKind int
 
 const (
-	MessageKindAuth = WsMessageKind(iota)
-	MessageKindSub
-	MessageKindResponse
+	MessageKindAuth     = WsMessageKind(iota) // MessageKindAuth - ответ на запрос авторизации
+	MessageKindSub                            // MessageKindSub - сообщение по подписке
+	MessageKindResponse                       // MessageKindResponse - ответ на произвольный запрос
 )
 
+// ConnectionInfo - данные соединения
 type ConnectionInfo struct {
-	Address     string
-	ConnOptions *opts.ClientPrivateConnOptions
-	SubHandler  WsMessageHandler
+	Address     string                         // Address - адрес для подключения
+	ConnOptions *opts.ClientPrivateConnOptions // ConnOptions - опции подключения
+	SubHandler  WsSubHandler                   // SubHandler - обработчик любого сообщения по подписке
 	conn        *conn.ClientPrivateConn
 	worker      *workerpoolws.ClientPrivateWorker
 	count       uint64
@@ -37,8 +39,14 @@ type ConnectionInfo struct {
 	subKinds    *sync.Map
 }
 
+// WsMessageHandler - сигнатура функции обработчика ws-сообщения
 type WsMessageHandler func(msg proto.Message) (needRetry bool, err error)
 
+// WsSubHandler - сигнатура функции обработчика ws-сообщения по подписке.
+// Отличие в том, что здесь нет такого понятия как retry
+type WsSubHandler func(msg proto.Message) error
+
+// WsMsgParser - сигнатура функции парсинга сообщения
 type WsMsgParser func([]byte) (WsMessageKind, WsMessage, error)
 
 type messageInfo struct {
@@ -47,12 +55,17 @@ type messageInfo struct {
 	isSub   bool
 }
 
+// WsMessage - сообщения для отправки по WS, обязательна возможность получения/присваивания id запроса
+//
+// Если в прото сообщении сделать поле id, то функция GetId сгенерится сама, а вот функцию SetId надо добавить
+// самостоятельно, это можно сделать с помощью объявления нового типа, в который будет встроен(embedding) тип запроса
 type WsMessage interface {
 	proto.Message
 	GetId() uint64
 	SetId(id uint64)
 }
 
+// WsClient - клиент для отправки сообщения по WebSocket
 type WsClient struct {
 	*client
 	connections []*ConnectionInfo
@@ -111,7 +124,7 @@ func (c *WsClient) handleMessage(connection *ConnectionInfo) workerpoolws.Client
 			}
 		case MessageKindSub:
 			if connection.SubHandler != nil {
-				if _, err := connection.SubHandler(data); err != nil {
+				if err := connection.SubHandler(data); err != nil {
 					c.notifier(fmt.Errorf("sub handle failed: %w", err))
 				}
 			}
@@ -134,8 +147,10 @@ func (c *WsClient) handleMessage(connection *ConnectionInfo) workerpoolws.Client
 				if err := connection.conn.SubConfirm(kind.(structs.SubKind)); err != nil {
 					c.notifier(err)
 				}
+			} else {
+				// при подписке нельзя удалять инфу, чтобы была возможной переподписка при падении коннекта
+				connection.messages.Delete(data.GetId())
 			}
-			connection.messages.Delete(data.GetId())
 		}
 	}
 }

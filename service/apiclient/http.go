@@ -11,6 +11,7 @@ import (
 	"time"
 )
 
+// HttpClient - клиент для вызовов с помощью http-запросов
 type HttpClient struct {
 	*client
 	httpClient  *http.Client
@@ -18,13 +19,16 @@ type HttpClient struct {
 	fillVersion func(http.Header)
 }
 
+// HttpMessage - сообщение для отправки другому сервису
 type HttpMessage struct {
-	Message proto.Message
-	Url     string
+	Message proto.Message // сообщение
+	Url     string        // часть адреса(path), то есть протокол и хост сюда не включены
 }
 
+// HttpMessageHandler - сигнатура функции обработки ответа на http запрос
 type HttpMessageHandler func(msg []byte) (needRetry bool, err error)
 
+// NewHttpClient - функция создания http клиента
 func NewHttpClient(baseUrl string, accessToken string, accessExpiresAt int64,
 	refreshToken string, refreshExpiresAt int64, fillVersion func(http.Header),
 	refresh refreshFunc, notifier errorNotifier) (*HttpClient, error) {
