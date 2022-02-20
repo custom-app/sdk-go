@@ -1,6 +1,7 @@
 package apiclient
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -10,8 +11,8 @@ var (
 	RefreshFuncIsRequired = errors.New("refresh function is required")
 )
 
-type refreshFunc func(token string) (authToken string, authExpiresAt int64,
-	refreshToken string, refreshExpiresAt int64, err error)
+type refreshFunc func(ctx context.Context, token string) (
+	authToken string, authExpiresAt int64, refreshToken string, refreshExpiresAt int64, err error)
 
 type errorNotifier func(err error)
 
@@ -24,8 +25,8 @@ type client struct {
 	refreshStopCh                     chan struct{}
 }
 
-func newClient(accessToken string, accessExpiresAt int64,
-	refreshToken string, refreshExpiresAt int64, refresh refreshFunc, notifier errorNotifier) (*client, error) {
+func newClient(accessToken string, accessExpiresAt int64, refreshToken string, refreshExpiresAt int64,
+	refresh refreshFunc, notifier errorNotifier) (*client, error) {
 	if refresh == nil {
 		return nil, RefreshFuncIsRequired
 	}
@@ -42,11 +43,6 @@ func newClient(accessToken string, accessExpiresAt int64,
 }
 
 func (c *client) start() error {
-	var err error
-	c.accessToken, c.accessExpiresAt, c.refreshToken, c.refreshExpiresAt, err = c.refresh(c.refreshToken)
-	if err != nil {
-		return err
-	}
 	go c.refreshTokens()
 	return nil
 }
@@ -71,7 +67,10 @@ func (c *client) refreshTokens() {
 		select {
 		case <-time.After(toWait):
 			c.tokenLock.Lock()
-			accessToken, accessExpiresAt, refreshToken, refreshExpiresAt, err := c.refresh(c.refreshToken)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			accessToken, accessExpiresAt, refreshToken, refreshExpiresAt, err :=
+				c.refresh(ctx, c.refreshToken)
+			cancel()
 			if err != nil {
 				if c.notifier != nil {
 					c.notifier(err)

@@ -329,14 +329,14 @@ func (m *AuthorizationMaker) createToken(ctx context.Context, tx *pg.Transaction
 
 // DropTokens - реализация метода DropTokens интерфейса AuthProvider
 func (m *AuthorizationMaker) DropTokens(ctx context.Context, role structs.Role, id, number int64) error {
+	m.lockers[role].Lock(id)
+	defer m.lockers[role].Unlock(id)
 	return m.queue.MakeJob(&workerpoolpg.Task{
 		Ctx:          ctx,
 		Options:      pgx.TxOptions{},
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
 		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, *workerpoolpg.JobResultErr) {
-			m.lockers[role].Lock(id)
-			defer m.lockers[role].Unlock(id)
 			if err := m.dropTokens(ctx, tx, role, id, number); err != nil {
 				return false, workerpoolpg.WrapError(err)
 			}
@@ -367,14 +367,14 @@ func (m *AuthorizationMaker) DropAllTokens(ctx context.Context, tx *pg.Transacti
 // ReCreateTokens - реализация метода ReCreateTokens интерфейса AuthProvider
 func (m *AuthorizationMaker) ReCreateTokens(ctx context.Context, role structs.Role,
 	id, number int64) (accessToken string, accessExpires int64, refreshToken string, refreshExpires int64, err error) {
+	m.lockers[role].Lock(id)
+	defer m.lockers[role].Unlock(id)
 	if err := m.queue.MakeJob(&workerpoolpg.Task{
 		Ctx:          ctx,
 		Options:      pgx.TxOptions{},
 		QueueTimeout: time.Second,
 		Timeout:      m.authTimeout,
 		Worker: func(ctx context.Context, tx *pg.Transaction) (bool, *workerpoolpg.JobResultErr) {
-			m.lockers[role].Lock(id)
-			defer m.lockers[role].Unlock(id)
 			if e := m.dropTokens(ctx, tx, role, id, number); e != nil {
 				return false, workerpoolpg.WrapError(e)
 			}

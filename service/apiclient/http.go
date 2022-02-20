@@ -2,17 +2,20 @@ package apiclient
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/loyal-inform/sdk-go/util/consts"
 	"google.golang.org/protobuf/proto"
 	"io/ioutil"
 	"net/http"
+	"time"
 )
 
 type HttpClient struct {
 	*client
-	httpClient *http.Client
-	baseUrl    string
+	httpClient  *http.Client
+	baseUrl     string
+	fillVersion func(http.Header)
 }
 
 type HttpMessage struct {
@@ -23,15 +26,17 @@ type HttpMessage struct {
 type HttpMessageHandler func(msg []byte) (needRetry bool, err error)
 
 func NewHttpClient(baseUrl string, accessToken string, accessExpiresAt int64,
-	refreshToken string, refreshExpiresAt int64, refresh refreshFunc, notifier errorNotifier) (*HttpClient, error) {
+	refreshToken string, refreshExpiresAt int64, fillVersion func(http.Header),
+	refresh refreshFunc, notifier errorNotifier) (*HttpClient, error) {
 	c, err := newClient(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt, refresh, notifier)
 	if err != nil {
 		return nil, err
 	}
 	return &HttpClient{
-		client:     c,
-		baseUrl:    baseUrl,
-		httpClient: &http.Client{},
+		client:      c,
+		baseUrl:     baseUrl,
+		httpClient:  &http.Client{},
+		fillVersion: fillVersion,
 	}, nil
 }
 
@@ -39,19 +44,23 @@ func (c *HttpClient) Start() error {
 	return c.client.start()
 }
 
-func (c *HttpClient) MakeRequest(msg *HttpMessage, handler HttpMessageHandler) {
+func (c *HttpClient) MakeRequest(ctx context.Context, msg *HttpMessage, handler HttpMessageHandler) {
 	data, err := proto.Marshal(msg.Message)
 	if err != nil {
 		c.notifier(fmt.Errorf("marshal request failed: %w", err))
 		return
 	}
-	r, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s%s", c.baseUrl, msg.Url), bytes.NewReader(data))
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s%s", c.baseUrl, msg.Url), bytes.NewReader(data))
 	if err != nil {
 		c.notifier(fmt.Errorf("create request failed: %w", err))
 		return
 	}
 	r.Header.Set(consts.HeaderContentType, consts.ProtoContentType)
 	r.Header.Set(consts.AuthHeader, fmt.Sprintf("%s%s", consts.TokenStart, c.getAccessToken()))
+	if c.fillVersion != nil {
+		c.fillVersion(r.Header)
+	}
 	resp, err := c.httpClient.Do(r)
 	if err != nil {
 		c.notifier(fmt.Errorf("do request failed: %w", err))
@@ -66,7 +75,9 @@ func (c *HttpClient) MakeRequest(msg *HttpMessage, handler HttpMessageHandler) {
 	if needRetry, err := handler(respData); err != nil {
 		c.notifier(fmt.Errorf("handle response: %w", err))
 		if needRetry {
-			c.MakeRequest(msg, handler)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			c.MakeRequest(ctx, msg, handler)
+			cancel()
 		}
 	}
 }

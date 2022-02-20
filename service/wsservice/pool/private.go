@@ -4,8 +4,8 @@ package pool
 import (
 	"github.com/gorilla/websocket"
 	"github.com/loyal-inform/sdk-go/logger"
-	"github.com/loyal-inform/sdk-go/service/ws/conn"
-	"github.com/loyal-inform/sdk-go/service/ws/opts"
+	"github.com/loyal-inform/sdk-go/service/wsservice/conn"
+	"github.com/loyal-inform/sdk-go/service/wsservice/opts"
 	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"net/http"
