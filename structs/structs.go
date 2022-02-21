@@ -8,12 +8,6 @@ import (
 type Role int32     // enum для роли
 type SubKind int32  // enum для топика подписки
 type Platform int32 // enum для платформы
-type Purpose int32  // Deprecated: используйте тип из пакета go-sdk/auth/jwt
-
-const (
-	PurposeAccess  = Purpose(iota) // Deprecated: используйте константу из пакета go-sdk/auth/jwt
-	PurposeRefresh                 // Deprecated: используйте константу из пакета go-sdk/auth/jwt
-)
 
 // Account - структура содержащая иммутабельную информацию о клиенте
 type Account struct {
