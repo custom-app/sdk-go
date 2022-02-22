@@ -44,6 +44,7 @@ type ClientPublicConn struct {
 	*Conn
 	options         *opts.ClientPublicConnOptions
 	url             string
+	headerLock      *sync.Mutex
 	header          http.Header
 	needRestart     bool
 	needRestartLock *sync.RWMutex
@@ -86,6 +87,7 @@ func newClientConn(url string, header http.Header, options *opts.ClientPublicCon
 		options:         options,
 		Conn:            c,
 		url:             url,
+		headerLock:      &sync.Mutex{},
 		header:          header,
 		needRestart:     options.NeedRestart,
 		subData:         map[structs.SubKind]clientSubData{},
@@ -164,7 +166,9 @@ func (c *ClientPublicConn) restart() {
 			break
 		}
 		dialer := &websocket.Dialer{}
+		c.headerLock.Lock()
 		conn, _, err := dialer.Dial(c.url, c.header)
+		c.headerLock.Unlock()
 		if err != nil {
 			logger.Info("restart dial connection failed", err)
 			time.Sleep(c.options.RetryPeriod)
@@ -421,7 +425,9 @@ func (c *ClientPrivateConn) restart() {
 			break
 		}
 		dialer := &websocket.Dialer{}
+		c.headerLock.Lock()
 		conn, _, err := dialer.Dial(c.url, c.header)
+		c.headerLock.Unlock()
 		if err != nil {
 			logger.Info("restart dial connection failed", err)
 			time.Sleep(c.options.RetryPeriod)
@@ -492,6 +498,13 @@ L:
 // ReceiveBuf - получение буфера входящих сообщений
 func (c *ClientPrivateConn) ReceiveBuf() chan *ClientPrivateMessage {
 	return c.receiveBuf
+}
+
+// UpdateHeader - функция изменения заголовка сокета, нужна в сущности ради обновления токена
+func (c *ClientPrivateConn) UpdateHeader(key, value string) {
+	c.headerLock.Lock()
+	c.header.Set(key, value)
+	c.headerLock.Unlock()
 }
 
 // Close - закрытие соединения

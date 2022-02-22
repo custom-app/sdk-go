@@ -26,22 +26,24 @@ type client struct {
 	accessToken, refreshToken         string
 	accessExpiresAt, refreshExpiresAt int64
 	refreshStopCh                     chan struct{}
+	updateTokenCallback               func(string)
 }
 
 func newClient(accessToken string, accessExpiresAt int64, refreshToken string, refreshExpiresAt int64,
-	refresh refreshFunc, notifier errorNotifier) (*client, error) {
+	refresh refreshFunc, updateTokenCallback func(string), notifier errorNotifier) (*client, error) {
 	if refresh == nil {
 		return nil, RefreshFuncIsRequired
 	}
 	return &client{
-		refresh:          refresh,
-		accessToken:      accessToken,
-		refreshToken:     refreshToken,
-		accessExpiresAt:  accessExpiresAt,
-		refreshExpiresAt: refreshExpiresAt,
-		tokenLock:        &sync.Mutex{},
-		refreshStopCh:    make(chan struct{}),
-		notifier:         notifier,
+		refresh:             refresh,
+		accessToken:         accessToken,
+		refreshToken:        refreshToken,
+		accessExpiresAt:     accessExpiresAt,
+		refreshExpiresAt:    refreshExpiresAt,
+		tokenLock:           &sync.Mutex{},
+		refreshStopCh:       make(chan struct{}),
+		notifier:            notifier,
+		updateTokenCallback: updateTokenCallback,
 	}, nil
 }
 
@@ -81,6 +83,9 @@ func (c *client) refreshTokens() {
 			} else {
 				c.accessToken, c.accessExpiresAt, c.refreshToken, c.refreshExpiresAt =
 					accessToken, accessExpiresAt, refreshToken, refreshExpiresAt
+			}
+			if c.updateTokenCallback != nil {
+				c.updateTokenCallback(accessToken)
 			}
 			c.tokenLock.Unlock()
 		case <-c.refreshStopCh:
