@@ -32,7 +32,7 @@ type HttpMessageHandler func(msg []byte) (needRetry bool, err error)
 func NewHttpClient(baseUrl string, accessToken string, accessExpiresAt int64,
 	refreshToken string, refreshExpiresAt int64, fillVersion func(http.Header),
 	refresh refreshFunc, notifier errorNotifier) (*HttpClient, error) {
-	c, err := newClient(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt, refresh, notifier)
+	c, err := newClient(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt, refresh, nil, notifier)
 	if err != nil {
 		return nil, err
 	}

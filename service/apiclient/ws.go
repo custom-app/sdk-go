@@ -7,6 +7,7 @@ import (
 	"github.com/loyal-inform/sdk-go/service/wsservice/conn"
 	"github.com/loyal-inform/sdk-go/service/wsservice/opts"
 	"github.com/loyal-inform/sdk-go/structs"
+	"github.com/loyal-inform/sdk-go/util/consts"
 	"google.golang.org/protobuf/proto"
 	"sync"
 	"sync/atomic"
@@ -75,7 +76,11 @@ type WsClient struct {
 func NewWsClient(connections []*ConnectionInfo, accessToken string, accessExpiresAt int64,
 	refreshToken string, refreshExpiresAt int64,
 	refresh refreshFunc, notifier errorNotifier, msgParser WsMsgParser) (*WsClient, error) {
-	c, err := newClient(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt, refresh, notifier)
+	c, err := newClient(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt, refresh, func(token string) {
+		for _, c := range connections {
+			c.conn.UpdateHeader(consts.AuthHeader, fmt.Sprintf("%s%s", consts.TokenStart, token))
+		}
+	}, notifier)
 	if err != nil {
 		return nil, err
 	}
