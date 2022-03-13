@@ -51,7 +51,7 @@ func exec(cli *client.Client, containerID string, command []string) (types.IDRes
 func inspectExecResp(cli *client.Client, id string) (execResult, error) {
 	var execResult execResult
 
-	resp, err := cli.ContainerExecAttach(context.Background(), id, types.ExecConfig{})
+	resp, err := cli.ContainerExecAttach(context.Background(), id, types.ExecStartCheck{})
 	if err != nil {
 		return execResult, err
 	}
