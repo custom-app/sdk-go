@@ -6,11 +6,11 @@
 package conn
 
 import (
+	"github.com/custom-app/sdk-go/logger"
+	"github.com/custom-app/sdk-go/service/wsservice/opts"
+	"github.com/custom-app/sdk-go/structs"
+	"github.com/custom-app/sdk-go/util/consts"
 	"github.com/gorilla/websocket"
-	"github.com/loyal-inform/sdk-go/logger"
-	"github.com/loyal-inform/sdk-go/service/wsservice/opts"
-	"github.com/loyal-inform/sdk-go/structs"
-	"github.com/loyal-inform/sdk-go/util/consts"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"net/http"

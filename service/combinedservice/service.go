@@ -2,8 +2,8 @@
 package combinedservice
 
 import (
-	"github.com/loyal-inform/sdk-go/service/httpservice"
-	"github.com/loyal-inform/sdk-go/service/wsservice"
+	"github.com/custom-app/sdk-go/service/httpservice"
+	"github.com/custom-app/sdk-go/service/wsservice"
 )
 
 // Service - интерфейс, объединяющий интерфейсы http.Service и ws.Service

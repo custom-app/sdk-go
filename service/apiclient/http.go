@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/loyal-inform/sdk-go/util/consts"
+	"github.com/custom-app/sdk-go/util/consts"
 	"google.golang.org/protobuf/proto"
 	"io/ioutil"
 	"net/http"

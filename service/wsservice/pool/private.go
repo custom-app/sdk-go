@@ -2,11 +2,11 @@
 package pool
 
 import (
+	"github.com/custom-app/sdk-go/logger"
+	"github.com/custom-app/sdk-go/service/wsservice/conn"
+	"github.com/custom-app/sdk-go/service/wsservice/opts"
+	"github.com/custom-app/sdk-go/structs"
 	"github.com/gorilla/websocket"
-	"github.com/loyal-inform/sdk-go/logger"
-	"github.com/loyal-inform/sdk-go/service/wsservice/conn"
-	"github.com/loyal-inform/sdk-go/service/wsservice/opts"
-	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"net/http"
 	"sync"

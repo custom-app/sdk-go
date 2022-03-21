@@ -7,7 +7,7 @@
 Главный принцип - использование proto. Это достаточно гибкое решение, так позволяет описать API, но при этом позволяет
 оставить поддержку JSON.
 
-Документация доступна по адресу: https://godoc.customapp.tech/pkg/github.com/loyal-inform/sdk-go/ .
+Документация доступна по адресу: https://godoc.customapp.tech/pkg/github.com/custom-app/sdk-go/ .
 
 ## Development
 
@@ -30,7 +30,7 @@ godoc -goroot=$HOME/go/src -http=:6060
 ```
 
 3. Перейти по
-   ссылке [http://localhost:6060/pkg/github.com/loyal-inform/sdk-go/](http://localhost:6060/pkg/github.com/loyal-inform/sdk-go/)
+   ссылке [http://localhost:6060/pkg/github.com/custom-app/sdk-go/](http://localhost:6060/pkg/github.com/custom-app/sdk-go/)
 
 ## Ключевые концепты
 

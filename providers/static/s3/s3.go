@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/loyal-inform/sdk-go/providers/static/util"
+	"github.com/custom-app/sdk-go/providers/static/util"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"image"

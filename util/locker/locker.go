@@ -5,7 +5,7 @@
 package locker
 
 import (
-	"github.com/loyal-inform/sdk-go/logger"
+	"github.com/custom-app/sdk-go/logger"
 	"sync"
 )
 

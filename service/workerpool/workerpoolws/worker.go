@@ -1,7 +1,7 @@
 // Package workerpoolws - реализация обработчиков ws-сообщений из очереди
 package workerpoolws
 
-import "github.com/loyal-inform/sdk-go/service/wsservice/conn"
+import "github.com/custom-app/sdk-go/service/wsservice/conn"
 
 // Worker - обработчик простого сообщения
 type Worker struct {

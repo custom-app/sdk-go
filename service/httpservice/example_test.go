@@ -1,9 +1,9 @@
 package httpservice_test
 
 import (
+	"github.com/custom-app/sdk-go/service/httpservice"
+	"github.com/custom-app/sdk-go/service/workerpool/workerpoolhttp"
 	"github.com/gorilla/mux"
-	"github.com/loyal-inform/sdk-go/service/httpservice"
-	"github.com/loyal-inform/sdk-go/service/workerpool/workerpoolhttp"
 	"log"
 	"time"
 )

@@ -10,10 +10,10 @@ package pg
 import (
 	"context"
 	"fmt"
+	"github.com/custom-app/sdk-go/logger"
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v4"
 	"github.com/jackc/pgx/v4/pgxpool"
-	"github.com/loyal-inform/sdk-go/logger"
 	"sync"
 	"time"
 )

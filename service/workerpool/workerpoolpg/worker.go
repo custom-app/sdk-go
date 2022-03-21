@@ -2,9 +2,9 @@ package workerpoolpg
 
 import (
 	"context"
+	"github.com/custom-app/sdk-go/db/pg"
+	"github.com/custom-app/sdk-go/structs"
 	"github.com/jackc/pgx/v4"
-	"github.com/loyal-inform/sdk-go/db/pg"
-	"github.com/loyal-inform/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"time"
 )

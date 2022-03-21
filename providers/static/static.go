@@ -12,8 +12,8 @@ package static
 
 import (
 	"context"
-	"github.com/loyal-inform/sdk-go/providers/static/empty"
-	"github.com/loyal-inform/sdk-go/providers/static/util"
+	"github.com/custom-app/sdk-go/providers/static/empty"
+	"github.com/custom-app/sdk-go/providers/static/util"
 )
 
 // Provider - интерфейс для работы с хранилищем статических файлов

@@ -2,8 +2,8 @@ package apiclient_test
 
 import (
 	"context"
-	"github.com/loyal-inform/sdk-go/service/apiclient"
-	"github.com/loyal-inform/sdk-go/service/wsservice/opts"
+	"github.com/custom-app/sdk-go/service/apiclient"
+	"github.com/custom-app/sdk-go/service/wsservice/opts"
 	"google.golang.org/protobuf/proto"
 	"log"
 	"net/http"

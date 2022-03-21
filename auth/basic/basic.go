@@ -8,7 +8,7 @@ package basic
 import (
 	"context"
 	"fmt"
-	"github.com/loyal-inform/sdk-go/structs"
+	"github.com/custom-app/sdk-go/structs"
 	"google.golang.org/protobuf/proto"
 	"sync"
 )

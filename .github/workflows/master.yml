@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Update docs
-        run: docker-compose up -d
+        run: docker-compose up --build -d
       - name: Push nginx config
         run: cp docs/docs.conf docs/docs_pswd.txt /etc/nginx/conf.d
       - name: Restart nginx

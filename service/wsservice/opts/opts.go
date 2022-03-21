@@ -3,9 +3,9 @@ package opts
 
 import (
 	"errors"
-	"github.com/loyal-inform/sdk-go/service/httpservice"
-	"github.com/loyal-inform/sdk-go/structs"
-	"github.com/loyal-inform/sdk-go/util/consts"
+	"github.com/custom-app/sdk-go/service/httpservice"
+	"github.com/custom-app/sdk-go/structs"
+	"github.com/custom-app/sdk-go/util/consts"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"net/http"

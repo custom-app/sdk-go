@@ -8,11 +8,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/custom-app/sdk-go/logger"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 	_ "github.com/jackc/pgx/v4/stdlib"
-	"github.com/loyal-inform/sdk-go/logger"
 	"io/ioutil"
 	"time"
 )

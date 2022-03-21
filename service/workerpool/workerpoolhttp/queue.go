@@ -3,8 +3,8 @@ package workerpoolhttp
 
 import (
 	"errors"
-	"github.com/loyal-inform/sdk-go/service/httpservice"
-	"github.com/loyal-inform/sdk-go/util/consts"
+	"github.com/custom-app/sdk-go/service/httpservice"
+	"github.com/custom-app/sdk-go/util/consts"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"net/http"

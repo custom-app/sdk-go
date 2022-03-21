@@ -1,4 +1,4 @@
-module github.com/loyal-inform/sdk-go
+module github.com/custom-app/sdk-go
 
 go 1.15
 

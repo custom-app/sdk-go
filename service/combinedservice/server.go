@@ -3,9 +3,9 @@ package combinedservice
 import (
 	"context"
 	"encoding/json"
+	"github.com/custom-app/sdk-go/logger"
+	"github.com/custom-app/sdk-go/util/consts"
 	"github.com/gorilla/mux"
-	"github.com/loyal-inform/sdk-go/logger"
-	"github.com/loyal-inform/sdk-go/util/consts"
 	"net/http"
 )
 
