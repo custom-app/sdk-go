@@ -49,31 +49,9 @@ func (c *HttpClient) Start() error {
 }
 
 func (c *HttpClient) MakeRequest(ctx context.Context, msg *HttpMessage, handler HttpMessageHandler) {
-	data, err := proto.Marshal(msg.Message)
+	respData, err := c.MakeRequestWithResponse(ctx, msg)
 	if err != nil {
-		c.notifier(fmt.Errorf("marshal request failed: %w", err))
-		return
-	}
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		fmt.Sprintf("%s%s", c.baseUrl, msg.Url), bytes.NewReader(data))
-	if err != nil {
-		c.notifier(fmt.Errorf("create request failed: %w", err))
-		return
-	}
-	r.Header.Set(consts.HeaderContentType, consts.ProtoContentType)
-	r.Header.Set(consts.AuthHeader, fmt.Sprintf("%s%s", consts.TokenStart, c.getAccessToken()))
-	if c.fillVersion != nil {
-		c.fillVersion(r.Header)
-	}
-	resp, err := c.httpClient.Do(r)
-	if err != nil {
-		c.notifier(fmt.Errorf("do request failed: %w", err))
-		return
-	}
-	defer resp.Body.Close()
-	respData, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		c.notifier(fmt.Errorf("read response failed: %w", err))
+		c.notifier(fmt.Errorf("make request failed: %w", err))
 		return
 	}
 	if needRetry, err := handler(respData); err != nil {
@@ -84,6 +62,33 @@ func (c *HttpClient) MakeRequest(ctx context.Context, msg *HttpMessage, handler 
 			cancel()
 		}
 	}
+}
+
+func (c *HttpClient) MakeRequestWithResponse(ctx context.Context, msg *HttpMessage) ([]byte, error) {
+	data, err := proto.Marshal(msg.Message)
+	if err != nil {
+		return nil, err
+	}
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s%s", c.baseUrl, msg.Url), bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	r.Header.Set(consts.HeaderContentType, consts.ProtoContentType)
+	r.Header.Set(consts.AuthHeader, fmt.Sprintf("%s%s", consts.TokenStart, c.getAccessToken()))
+	if c.fillVersion != nil {
+		c.fillVersion(r.Header)
+	}
+	resp, err := c.httpClient.Do(r)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	respData, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return respData, nil
 }
 
 func (c *HttpClient) Stop() error {

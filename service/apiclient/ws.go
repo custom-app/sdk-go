@@ -41,7 +41,7 @@ type ConnectionInfo struct {
 }
 
 // WsMessageHandler - сигнатура функции обработчика ws-сообщения
-type WsMessageHandler func(msg proto.Message) (needRetry bool, err error)
+type WsMessageHandler func(msg WsMessage) (needRetry bool, err error)
 
 // WsSubHandler - сигнатура функции обработчика ws-сообщения по подписке.
 // Отличие в том, что здесь нет такого понятия как retry
@@ -173,6 +173,29 @@ func (c *WsClient) SendMessage(connInd int, msg WsMessage, handler WsMessageHand
 	})
 	connInfo.conn.SendMessage(msg)
 	return nil
+}
+
+func (c *WsClient) SendMessageWithResponse(connInd int, msg WsMessage) (WsMessage, error) {
+	if connInd < 0 || connInd >= len(c.connections) {
+		return nil, ConnIndexOutOfRangeErr
+	}
+	connInfo := c.connections[connInd]
+	id := atomic.AddUint64(&connInfo.count, 1)
+	msg.SetId(id)
+	resCh := make(chan WsMessage)
+	connInfo.messages.Store(id, &messageInfo{
+		msg: msg,
+		handler: func(msg WsMessage) (needRetry bool, err error) {
+			if msg.GetId() == id {
+				resCh <- msg
+			}
+			return false, nil
+		},
+	})
+	connInfo.conn.SendMessage(msg)
+	res := <-resCh
+	close(resCh)
+	return res, nil
 }
 
 func (c *WsClient) Sub(connInd int, kind structs.SubKind, req WsMessage, handler WsMessageHandler) error {
