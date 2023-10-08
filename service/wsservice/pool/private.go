@@ -133,7 +133,6 @@ func (p *PrivatePool) SendOnSubAll(role structs.Role, kind structs.SubKind, id, 
 			acc := c.GetAccount()
 			subValue := c.GetSub(kind)
 			if (acc.Id != id || c.ConnId() != connId || (acc.Id == id && force)) && subValue {
-				logger.Log("sending sub with all to", *acc, c.ConnId(), data)
 				c.SendData(&conn.SentMessage{
 					Data: data,
 				})
@@ -151,7 +150,6 @@ func (p *PrivatePool) SendOnSubReceivers(role structs.Role, kind structs.SubKind
 			acc := c.GetAccount()
 			subValue := c.GetSub(kind)
 			if (acc.Id != id || c.ConnId() != connId || (acc.Id == id && force)) && subValue {
-				logger.Log("sending sub with receivers to", *acc, c.ConnId(), data)
 				c.SendData(&conn.SentMessage{
 					Data: data,
 				})
