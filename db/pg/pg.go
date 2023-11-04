@@ -96,6 +96,22 @@ func Init(url string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
+// InitWithConfig - инициализация пула соединений с конфигом вместо connection string
+func InitWithConfig(cfg *pgxpool.Config) (*pgxpool.Pool, error) {
+	if db != nil {
+		return db, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cfg.MaxConnLifetime = 2 * time.Minute
+	pool, err := pgxpool.ConnectConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	db = pool
+	return pool, nil
+}
+
 // Ping - проверка состояния базы данных
 func Ping() error {
 	if db == nil {
