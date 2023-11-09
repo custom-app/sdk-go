@@ -355,6 +355,7 @@ func UpgradePrivateServerConn(upgrader *websocket.Upgrader, w http.ResponseWrite
 	}
 	a := r.Header.Get(consts.AuthHeader)
 	isToken := strings.HasPrefix(a, consts.TokenStart)
+	cookieValue, cookieErr := r.Cookie(options.AuthOptions.CookieName)
 	login, password, isBasic := r.BasicAuth()
 	platform, versions := httpservice.ParseVersionHeader(r.Header, options.AuthOptions.VersionHeader)
 	var (
@@ -367,6 +368,8 @@ func UpgradePrivateServerConn(upgrader *websocket.Upgrader, w http.ResponseWrite
 		res, err = privateServerConnViaBasic(upgrader, w, r, options, platform, versions, login, password, onauth, onclose)
 	} else if options.AuthOptions.RequestAllowed {
 		res, err = privateServerConnViaRequest(upgrader, w, r, options, onauth, onclose)
+	} else if options.AuthOptions.CookieAllowed && cookieErr == nil && strings.HasPrefix(cookieValue.Value, consts.TokenStart) {
+		res, err = privateServerConnViaToken(upgrader, w, r, options, platform, versions, a, onauth, onclose)
 	} else {
 		code, e := options.AuthOptions.ErrorMapper(auth.FailedAuthErr)
 		httpservice.SendResponseWithContentType(w, r, code, e)

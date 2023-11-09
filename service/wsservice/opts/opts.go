@@ -47,12 +47,13 @@ type Options struct {
 // AuthOptions - опции авторизации соединения
 type AuthOptions struct {
 	// Допускается ли авторизация с помощью basic-авторизации, jwt токена и запроса, посланного после инициализации сокета
-	BasicAllowed, TokenAllowed, RequestAllowed bool
-	VersionHeader                              string                      // Имя заголовка с версией
-	VersionChecker                             httpservice.VersionChecker  // Функция проверки версии
-	Disabled                                   []structs.Role              // Список ролей, которым запрещено подключение
-	ErrorMapper                                httpservice.AuthErrorMapper // Преобразователь ошибок авторизации в формат API системы
-	Timeout                                    time.Duration               // Таймаут авторизации по запросу
+	BasicAllowed, TokenAllowed, RequestAllowed, CookieAllowed bool
+	CookieName                                                string
+	VersionHeader                                             string                      // Имя заголовка с версией
+	VersionChecker                                            httpservice.VersionChecker  // Функция проверки версии
+	Disabled                                                  []structs.Role              // Список ролей, которым запрещено подключение
+	ErrorMapper                                               httpservice.AuthErrorMapper // Преобразователь ошибок авторизации в формат API системы
+	Timeout                                                   time.Duration               // Таймаут авторизации по запросу
 }
 
 // ServerPublicConnOptions - опции для публичных соединений. Используется для сервера
