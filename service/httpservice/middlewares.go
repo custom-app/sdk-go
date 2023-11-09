@@ -49,7 +49,8 @@ func VersionMiddleware(header string, checker VersionChecker) func(http.Handler)
 }
 
 type AuthKind struct {
-	Basic, AuthToken, RefreshToken bool
+	Basic, AuthToken, RefreshToken, Cookie bool
+	CookieName                             string
 }
 
 type AuthErrorMapper func(error) (int, proto.Message)
@@ -58,6 +59,7 @@ func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...str
 	return func(handler http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			a := r.Header.Get(consts.AuthHeader)
+			cookieValue, cookieErr := r.Cookie(accepted.CookieName)
 			isToken := strings.HasPrefix(a, consts.TokenStart)
 			login, password, ok := r.BasicAuth()
 			platform, _ := r.Context().Value(consts.PlatformCtxKey).(structs.Platform)
@@ -76,6 +78,16 @@ func AuthMiddleware(accepted AuthKind, errorMapper AuthErrorMapper, roles ...str
 				} else {
 					acc, number, err = jwt.Auth(r.Context(), a[consts.TokenStartInd:],
 						jwt.PurposeRefresh, platform, versions)
+				}
+			} else if accepted.Cookie && cookieErr == nil && strings.HasPrefix(cookieValue.Value, consts.TokenStart) {
+				if accepted.AuthToken {
+					acc, number, err = jwt.Auth(r.Context(), cookieValue.Value[consts.TokenStartInd:],
+						jwt.PurposeAccess, platform, versions)
+				} else if accepted.RefreshToken {
+					acc, number, err = jwt.Auth(r.Context(), cookieValue.Value[consts.TokenStartInd:],
+						jwt.PurposeRefresh, platform, versions)
+				} else {
+					err = MissingCredentials
 				}
 			} else {
 				err = MissingCredentials
